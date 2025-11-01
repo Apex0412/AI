@@ -4,7 +4,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List
 
-from shapely.geometry import LineString, Polygon, box, mapping
+from shapely.geometry import LineString, Polygon, box, mapping, shape
 
 from google_client import GoogleClient
 from kml_utils import KMLDataLoader, export_geojson as export_geojson_file
@@ -20,12 +20,31 @@ class RoutingEngine:
         city_polygon, road_segments = self.loader.load()
         self.state.city_polygon = city_polygon
         self.state.road_segments = road_segments
+
+        tractors_count = int(options.get("tractors_count", self.state.tractors_count or len(self.state.tractors)))
+        self.state.ensure_tractors(tractors_count)
+
+        if options.get("base_location"):
+            self.state.base_location = options["base_location"]
+
+        self.state.route_limit_km = float(options.get("route_limit_km", self.state.route_limit_km))
+        self.state.travel_mode = options.get("travel_mode", self.state.travel_mode)
+        self.state.max_waypoints = int(options.get("max_waypoints", self.state.max_waypoints))
+
         if not self.state.assignments:
-            self.state.assignments = self._auto_assign(road_segments, self.state.tractors)
+            self.state.assignments = self.auto_assign_roads(road_segments)
+
+        if not self.state.grid:
+            grid_size = int(options.get("grid_size", max(6, self.state.tractors_count * 4)))
+            self.state.grid = self.generate_grid(city_polygon, grid_size)
+
+        if not self.state.grid_assignments and self.state.grid:
+            self.state.grid_assignments = self.auto_assign_grid(self.state.grid)
 
         google_client = GoogleClient({**google_keys, "default": google_keys.get("directions", "")})
         routes: List[Dict] = []
         log_entries: List[Dict] = []
+        progress: List[Dict] = []
         base = self.state.base_location
         base_str = f"{base['lat']},{base['lng']}"
 
@@ -34,6 +53,14 @@ class RoutingEngine:
         for tractor in self.state.tractors:
             assigned_ids = self.state.assignments.get(tractor["id"], [])
             if not assigned_ids:
+                progress.append(
+                    {
+                        "tractor": tractor["name"],
+                        "distance_km": 0.0,
+                        "limit_km": self.state.route_limit_km,
+                        "segments": 0,
+                    }
+                )
                 continue
             tractor_route = {
                 "tractor": tractor,
@@ -57,7 +84,12 @@ class RoutingEngine:
                 start_str = f"{start[1]},{start[0]}"
                 end_str = f"{end[1]},{end[0]}"
 
-                transition = google_client.directions(previous_point, start_str)
+                transition = google_client.directions(
+                    previous_point,
+                    start_str,
+                    mode=self.state.travel_mode,
+                    max_waypoints=self.state.max_waypoints,
+                )
                 snapped = google_client.snap_to_roads([f"{c[1]},{c[0]}" for c in coords])
                 elevation = google_client.elevation([start_str, end_str])
                 geocode = google_client.geocode(start_str)
@@ -68,17 +100,19 @@ class RoutingEngine:
                 transition_duration = self._extract_duration(transition)
                 seg_distance = self._line_length_km(LineString([(c[0], c[1]) for c in coords]))
 
-                tractor_route["segments"].append({
-                    "id": seg_id,
-                    "name": segment.get("name"),
-                    "geometry": geometry,
-                    "snap": snapped,
-                    "elevation": elevation,
-                    "geocode": geocode,
-                    "places": places,
-                    "timezone": timezone,
-                    "segment_distance_km": seg_distance,
-                })
+                tractor_route["segments"].append(
+                    {
+                        "id": seg_id,
+                        "name": segment.get("name"),
+                        "geometry": geometry,
+                        "snap": snapped,
+                        "elevation": elevation,
+                        "geocode": geocode,
+                        "places": places,
+                        "timezone": timezone,
+                        "segment_distance_km": seg_distance,
+                    }
+                )
                 tractor_route["transitions"].append(
                     {
                         "from": previous_point,
@@ -92,6 +126,19 @@ class RoutingEngine:
                 tractor_route["duration_min"] += transition_duration
                 previous_point = end_str
 
+                if tractor_route["distance_km"] >= self.state.route_limit_km:
+                    log_entries.append(
+                        {
+                            "tractor": tractor["name"],
+                            "distance_km": round(tractor_route["distance_km"], 2),
+                            "segments": len(tractor_route["segments"]),
+                            "timestamp": datetime.utcnow().isoformat(),
+                            "level": "WARNING",
+                            "message": "Достигнут лимит маршрута",
+                        }
+                    )
+                    break
+
             routes.append(tractor_route)
             log_entries.append(
                 {
@@ -99,15 +146,106 @@ class RoutingEngine:
                     "distance_km": round(tractor_route["distance_km"], 2),
                     "segments": len(tractor_route["segments"]),
                     "timestamp": datetime.utcnow().isoformat(),
+                    "level": "INFO",
+                    "message": "Маршрут построен",
+                }
+            )
+            progress.append(
+                {
+                    "tractor": tractor["name"],
+                    "distance_km": round(tractor_route["distance_km"], 2),
+                    "limit_km": self.state.route_limit_km,
+                    "segments": len(tractor_route["segments"]),
                 }
             )
 
         metadata = {
             "assignments": self.state.assignments,
-            "grid": self._build_grid(city_polygon, options.get("grid_size", 6)),
+            "grid": self.state.grid,
+            "progress": progress,
+            "eta": self._estimate_eta(progress),
         }
 
         return {"routes": routes, "log": log_entries, "metadata": metadata}
+
+    def build_grid(self, grid_size: int) -> List[Dict]:
+        city_polygon, _ = self.loader.load()
+        self.state.city_polygon = city_polygon
+        grid = self.generate_grid(city_polygon, grid_size)
+        self.state.grid = grid
+        return grid
+
+    def auto_assign_roads(self, road_segments: List[Dict]) -> Dict[str, List[str]]:
+        tractors = self.state.tractors
+        assignments: Dict[str, List[str]] = {tractor["id"]: [] for tractor in tractors}
+        for idx, segment in enumerate(road_segments):
+            tractor = tractors[idx % len(tractors)]
+            assignments[tractor["id"]].append(segment["id"])
+        return assignments
+
+    def auto_assign_grid(self, grid: List[Dict]) -> Dict[str, str]:
+        tractors = self.state.tractors
+        if not tractors:
+            return {}
+        shapes: Dict[str, Polygon] = {cell["id"]: shape(cell["geometry"]) for cell in grid}
+        adjacency: Dict[str, List[str]] = {cell_id: [] for cell_id in shapes.keys()}
+        cell_ids = list(shapes.keys())
+        for i, cell_id in enumerate(cell_ids):
+            for j in range(i + 1, len(cell_ids)):
+                other_id = cell_ids[j]
+                if shapes[cell_id].touches(shapes[other_id]) or shapes[cell_id].intersects(shapes[other_id]):
+                    adjacency[cell_id].append(other_id)
+                    adjacency[other_id].append(cell_id)
+
+        total_cells = len(grid)
+        target_per_tractor = max(1, total_cells // len(tractors))
+        assigned: Dict[str, str] = {}
+        counts: Dict[str, int] = {tractor["id"]: 0 for tractor in tractors}
+        tractor_cycle = list(tractors)
+        tractor_index = 0
+
+        for seed in cell_ids:
+            if seed in assigned:
+                continue
+            tractor = tractor_cycle[tractor_index % len(tractor_cycle)]
+            tractor_index += 1
+            queue = [seed]
+            while queue:
+                current = queue.pop(0)
+                if current in assigned:
+                    continue
+                assigned[current] = tractor["id"]
+                counts[tractor["id"]] += 1
+                if counts[tractor["id"]] >= target_per_tractor and len(assigned) < total_cells:
+                    break
+                for neighbor in adjacency[current]:
+                    if neighbor not in assigned:
+                        queue.append(neighbor)
+
+        for cell_id in cell_ids:
+            if cell_id in assigned:
+                continue
+            tractor = min(tractor_cycle, key=lambda t: counts[t["id"]])
+            assigned[cell_id] = tractor["id"]
+            counts[tractor["id"]] += 1
+
+        return assigned
+
+    def generate_grid(self, polygon: Polygon, divisions: int) -> List[Dict]:
+        if divisions < 1:
+            divisions = 1
+        minx, miny, maxx, maxy = polygon.bounds
+        dx = (maxx - minx) / divisions
+        dy = (maxy - miny) / divisions
+        cells: List[Dict] = []
+        for i in range(divisions):
+            for j in range(divisions):
+                cell = box(minx + i * dx, miny + j * dy, minx + (i + 1) * dx, miny + (j + 1) * dy)
+                intersection = polygon.intersection(cell)
+                if intersection.is_empty:
+                    continue
+                cells.append({"id": f"cell-{i}-{j}", "geometry": mapping(intersection)})
+        return cells
 
     def _line_length_km(self, line: LineString) -> float:
         return line.length * 111
@@ -128,36 +266,19 @@ class RoutingEngine:
         except (IndexError, AttributeError):
             return 0.0
 
-    def _build_grid(self, polygon: Polygon, grid_size: int) -> List[Dict]:
-        minx, miny, maxx, maxy = polygon.bounds
-        dx = (maxx - minx) / grid_size
-        dy = (maxy - miny) / grid_size
-        cells: List[Dict] = []
-        for i in range(grid_size):
-            for j in range(grid_size):
-                cell = box(minx + i * dx, miny + j * dy, minx + (i + 1) * dx, miny + (j + 1) * dy)
-                intersection = polygon.intersection(cell)
-                if intersection.is_empty:
-                    continue
-                cells.append({
-                    "id": f"cell-{i}-{j}",
-                    "geometry": mapping(intersection),
-                })
-        return cells
-
-    def _auto_assign(self, road_segments: List[Dict], tractors: List[Dict]) -> Dict[str, List[str]]:
-        assignments: Dict[str, List[str]] = {tractor["id"]: [] for tractor in tractors}
-        for idx, segment in enumerate(road_segments):
-            tractor = tractors[idx % len(tractors)]
-            assignments[tractor["id"]].append(segment["id"])
-        return assignments
+    def _estimate_eta(self, progress: List[Dict]) -> Dict:
+        if not progress:
+            return {"status": "idle"}
+        total_limit = sum(item["limit_km"] for item in progress)
+        total_distance = sum(item["distance_km"] for item in progress)
+        completion = min(1.0, total_distance / total_limit) if total_limit else 0.0
+        return {"status": "running", "completion": round(completion, 2)}
 
     def export_kml(self, path: Path) -> None:
         from simplekml import Kml
 
         _, road_segments = self.loader.load()
         if not self.state.routes:
-            # Build lightweight route representation from assignments
             self.state.routes = [
                 {
                     "tractor": tractor,

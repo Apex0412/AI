@@ -8,9 +8,20 @@ body {
   font-family: "Inter", "Segoe UI", sans-serif;
 }
 
+body.night {
+  background-color: #020617;
+  color: #e2e8f0;
+}
+
 button:disabled {
   opacity: 0.6;
   cursor: progress;
+}
+
+button,
+input,
+select {
+  outline: none;
 }
 
 ::-webkit-scrollbar {
@@ -20,4 +31,145 @@ button:disabled {
 ::-webkit-scrollbar-thumb {
   background-color: rgba(148, 163, 184, 0.35);
   border-radius: 999px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: rgb(203 213 225 / 0.9);
+}
+
+.field input,
+.field select {
+  width: 100%;
+  border-radius: 0.75rem;
+  border: 1px solid rgba(51, 65, 85, 0.9);
+  background-color: rgba(15, 23, 42, 0.6);
+  padding: 0.5rem 0.75rem;
+  font-size: 0.875rem;
+  color: rgb(226 232 240);
+  transition: border 0.2s ease, box-shadow 0.2s ease;
+}
+
+.field input::placeholder,
+.field select::placeholder {
+  color: rgba(148, 163, 184, 0.7);
+}
+
+.field input:focus,
+.field select:focus {
+  border-color: rgba(52, 211, 153, 0.7);
+  box-shadow: 0 0 0 2px rgba(45, 212, 191, 0.25);
+}
+
+.primary-btn,
+.secondary-btn,
+.ghost-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  width: 100%;
+  border-radius: 1.25rem;
+  padding: 0.6rem 1rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  transition: all 0.2s ease;
+}
+
+.primary-btn {
+  background: rgb(16 185 129);
+  color: rgb(15 23 42);
+  box-shadow: 0 20px 45px -20px rgba(16, 185, 129, 0.8);
+}
+
+.primary-btn:hover {
+  background: rgb(45 212 191);
+}
+
+.secondary-btn {
+  background: rgba(16, 185, 129, 0.1);
+  border: 1px solid rgba(16, 185, 129, 0.35);
+  color: rgb(167 243 208);
+}
+
+.secondary-btn:hover {
+  border-color: rgba(52, 211, 153, 0.65);
+  color: rgb(209 250 229);
+}
+
+.ghost-btn {
+  background: transparent;
+  border: 1px solid transparent;
+  color: rgb(148 163 184);
+}
+
+.ghost-btn:hover {
+  border-color: rgba(71, 85, 105, 0.8);
+  color: rgb(226 232 240);
+}
+
+.checkbox-pill,
+.radio-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  border-radius: 999px;
+  border: 1px solid rgba(71, 85, 105, 0.8);
+  background: rgba(15, 23, 42, 0.6);
+  padding: 0.35rem 0.75rem;
+  transition: border 0.2s ease;
+}
+
+.checkbox-pill:hover,
+.radio-pill:hover {
+  border-color: rgba(16, 185, 129, 0.6);
+}
+
+.checkbox-pill input,
+.radio-pill input {
+  accent-color: rgb(16 185 129);
+}
+
+.tab-btn {
+  border-radius: 999px;
+  border: 1px solid transparent;
+  padding: 0.35rem 0.85rem;
+  font-weight: 600;
+  color: rgb(148 163 184);
+  transition: all 0.2s ease;
+}
+
+.tab-btn:hover {
+  color: rgb(226 232 240);
+}
+
+.tab-btn.active {
+  border-color: rgba(16, 185, 129, 0.6);
+  background: rgba(16, 185, 129, 0.15);
+  color: rgb(209 250 229);
+}
+
+#assignment-dialog.show,
+#help-drawer.show {
+  pointer-events: auto;
+}
+
+#assignment-dialog.show > div,
+#help-drawer.show {
+  animation: fade-in 0.3s ease forwards;
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }

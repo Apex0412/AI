@@ -20,14 +20,23 @@ class GoogleClient:
             params = {**params, "key": key}
         return params
 
-    def directions(self, origin: str, destination: str, waypoints: Optional[List[str]] = None) -> Dict:
-        params = {"origin": origin, "destination": destination, "mode": "driving"}
+    def directions(
+        self,
+        origin: str,
+        destination: str,
+        waypoints: Optional[List[str]] = None,
+        mode: str = "driving",
+        max_waypoints: int = 25,
+    ) -> Dict:
+        params = {"origin": origin, "destination": destination, "mode": mode}
         if waypoints:
+            if len(waypoints) > max_waypoints:
+                waypoints = waypoints[:max_waypoints]
             params["waypoints"] = "|".join(waypoints)
         return self._request("https://maps.googleapis.com/maps/api/directions/json", params, "directions")
 
-    def distance_matrix(self, origins: List[str], destinations: List[str]) -> Dict:
-        params = {"origins": "|".join(origins), "destinations": "|".join(destinations), "mode": "driving"}
+    def distance_matrix(self, origins: List[str], destinations: List[str], mode: str = "driving") -> Dict:
+        params = {"origins": "|".join(origins), "destinations": "|".join(destinations), "mode": mode}
         return self._request(
             "https://maps.googleapis.com/maps/api/distancematrix/json", params, "distance_matrix"
         )
@@ -61,6 +70,14 @@ class GoogleClient:
     def time_zone(self, location: str, timestamp: int) -> Dict:
         params = {"location": location, "timestamp": timestamp}
         return self._request("https://maps.googleapis.com/maps/api/timezone/json", params, "timezone")
+
+    def validate_key(self, key: str, service: str = "directions") -> Dict:
+        client = GoogleClient({**self.api_keys, service: key, "default": key})
+        response = client.geocode("55.7522,37.6156")
+        status = response.get("status")
+        if status == "OK":
+            return {"valid": True, "status": status}
+        return {"valid": False, "status": status or response.get("error"), "details": response}
 
     def _request(self, url: str, params: Dict, service: str, method: str = "get") -> Dict:
         key = self.api_keys.get(service) or self.api_keys.get("default")
