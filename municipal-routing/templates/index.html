@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="ru" class="h-full">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Municipal Routing Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}" />
+  </head>
+  <body class="h-full bg-slate-900 text-slate-100">
+    <div class="flex h-full">
+      <div class="flex-1 relative">
+        <div id="map" class="absolute inset-0"></div>
+        <div
+          class="absolute top-6 left-6 bg-slate-900/70 backdrop-blur rounded-xl shadow-2xl border border-slate-700 p-4 w-80 space-y-3"
+        >
+          <h1 class="text-xl font-semibold tracking-wide">Маршрутизация тракторов</h1>
+          <div class="grid grid-cols-2 gap-2 text-sm text-slate-300">
+            <div>
+              <p class="font-medium text-slate-100">База</p>
+              <p id="base-location"></p>
+            </div>
+            <div>
+              <p class="font-medium text-slate-100">Последний запуск</p>
+              <p id="last-run">—</p>
+            </div>
+          </div>
+          <button
+            id="run-routing"
+            class="w-full rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-900 font-semibold py-2 transition"
+          >
+            Построить маршруты
+          </button>
+          <div class="flex gap-2 text-sm">
+            <button
+              data-export="kml"
+              class="flex-1 rounded-lg border border-slate-600 hover:border-emerald-400/80 py-2"
+            >
+              Экспорт KML
+            </button>
+            <button
+              data-export="geojson"
+              class="flex-1 rounded-lg border border-slate-600 hover:border-sky-400/80 py-2"
+            >
+              Экспорт GeoJSON
+            </button>
+          </div>
+          <div>
+            <h2 class="text-sm font-semibold uppercase tracking-widest text-slate-400">Слои</h2>
+            <div class="mt-2 space-y-1 text-sm">
+              <label class="flex items-center gap-2">
+                <input type="checkbox" id="toggle-zones" class="accent-emerald-400" checked />
+                Сетки зон
+              </label>
+              <label class="flex items-center gap-2">
+                <input type="checkbox" id="toggle-roads" class="accent-emerald-400" checked />
+                Дорожные сегменты
+              </label>
+              <label class="flex items-center gap-2">
+                <input type="checkbox" id="toggle-routes" class="accent-emerald-400" checked />
+                Маршруты тракторов
+              </label>
+            </div>
+          </div>
+        </div>
+      </div>
+      <aside class="w-[420px] bg-slate-950/80 backdrop-blur border-l border-slate-800 flex flex-col">
+        <div class="p-6 border-b border-slate-800">
+          <h2 class="text-lg font-semibold">Диспетчер</h2>
+          <p class="text-sm text-slate-400 mt-1">
+            Управляйте назначениями, просматривайте логи и мониторинг в реальном времени.
+          </p>
+          <div class="mt-4 grid grid-cols-2 gap-3 text-sm">
+            <button id="open-assignments" class="rounded-lg bg-slate-800 hover:bg-slate-700 py-2">Назначения</button>
+            <button id="open-monitoring" class="rounded-lg bg-slate-800 hover:bg-slate-700 py-2">Мониторинг</button>
+          </div>
+        </div>
+        <div class="flex-1 overflow-y-auto" id="panels">
+          <div id="panel-log" class="p-6 space-y-4">
+            <h3 class="uppercase text-xs tracking-[0.3em] text-slate-500">Логи</h3>
+            <div id="log-entries" class="space-y-3 text-sm"></div>
+          </div>
+        </div>
+      </aside>
+    </div>
+
+    <script>
+      window.__INITIAL_STATE__ = {{ state | tojson }};
+    </script>
+    <script src="{{ url_for('static', filename='app.js') }}" type="module"></script>
+    {% if google_maps_key %}
+    <script
+      src="https://maps.googleapis.com/maps/api/js?key={{ google_maps_key }}&libraries=places"
+      async
+      defer
+    ></script>
+    {% else %}
+    <script
+      src="https://maps.googleapis.com/maps/api/js?libraries=places"
+      async
+      defer
+    ></script>
+    {% endif %}
+  </body>
+</html>
