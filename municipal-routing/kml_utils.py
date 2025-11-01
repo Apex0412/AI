@@ -42,6 +42,9 @@ class KMLDataLoader:
             self._cache = (city_polygon, road_segments)
         return self._cache
 
+    def invalidate(self) -> None:
+        self._cache = None
+
     def _parse_city_polygon(self) -> Polygon:
         tree = ET.parse(self.city_path)
         root = tree.getroot()

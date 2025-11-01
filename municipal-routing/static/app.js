@@ -44,11 +44,63 @@ const setFieldValues = () => {
   qs("#max-waypoints").value = appState.max_waypoints || 23;
   qs("#base-lat").value = appState.base_location?.lat?.toFixed(4) ?? "";
   qs("#base-lng").value = appState.base_location?.lng?.toFixed(4) ?? "";
-  qs("#google-status").textContent = appState.google_api_key ? "Google OK" : "Не проверен";
-  qs("#google-status").className = appState.google_api_key ? "font-semibold text-emerald-300" : "font-semibold text-amber-300";
   qs("#night-mode").checked = Boolean(appState.night_mode);
   qs("#simplify-routes").checked = false;
+  updateGoogleStatus();
 };
+
+function computeGoogleStatus() {
+  const metaStatus = appState.metadata?.google_key_status;
+  if (metaStatus === "error") return "error";
+  if (metaStatus === "ok" || appState.google_api_key) return "ok";
+  return "pending";
+}
+
+function updateGoogleStatus() {
+  const status = computeGoogleStatus();
+  const googleStatusEl = qs("#google-status");
+  if (googleStatusEl) {
+    let text = "Не проверен";
+    let colorClass = "text-amber-300";
+    if (status === "ok") {
+      text = "Google OK";
+      colorClass = "text-emerald-300";
+    } else if (status === "error") {
+      text = "Ошибка доступа";
+      colorClass = "text-red-400";
+    }
+    googleStatusEl.textContent = text;
+    googleStatusEl.className = `font-semibold ${colorClass}`;
+  }
+
+  const indicator = qs("#api-status-indicator");
+  const indicatorLabel = qs("#api-status-label");
+  const indicatorCaption = qs("#api-status-caption");
+  const detail = appState.metadata?.google_key_status_detail;
+  if (indicator) {
+    indicator.className = `status-indicator status-${status}`;
+    indicator.textContent = "✓";
+  }
+  if (indicatorLabel) {
+    if (status === "ok") {
+      indicatorLabel.textContent = "Google API доступен";
+      indicatorLabel.className = "text-xs font-semibold text-emerald-300";
+      if (indicatorCaption)
+        indicatorCaption.textContent = detail ? `Статус: ${detail}` : "Запросы к сервисам выполняются";
+    } else if (status === "error") {
+      indicatorLabel.textContent = "Google API недоступен";
+      indicatorLabel.className = "text-xs font-semibold text-red-400";
+      if (indicatorCaption)
+        indicatorCaption.textContent = detail
+          ? `Ошибка: ${detail}`
+          : "Проверьте ключ в настройках";
+    } else {
+      indicatorLabel.textContent = "Google API не проверен";
+      indicatorLabel.className = "text-xs font-semibold text-amber-300";
+      if (indicatorCaption) indicatorCaption.textContent = "Нажмите \"Проверить\" для подтверждения";
+    }
+  }
+}
 
 const updateBaseInfo = () => {
   if (appState.base_location) {
@@ -61,27 +113,37 @@ const updateBaseInfo = () => {
 
 const updateLegend = () => {
   const legend = qs("#legend");
-  legend.innerHTML = "";
+  if (!legend) return;
+  legend.textContent = "";
   (appState.tractors || []).forEach((tractor) => {
-    const distance =
-      appState.routes
-        ?.find((route) => route.tractor?.id === tractor.id)?.distance_km?.toFixed(1) || "0.0";
-    const item = document.createElement("div");
-    item.className = "flex items-center justify-between rounded-2xl bg-slate-800/60 px-4 py-3";
-    item.innerHTML = `
-      <div class="flex items-center gap-3">
-        <span class="inline-flex h-4 w-4 rounded-full" style="background:${tractor.color}"></span>
-        <span class="font-semibold text-slate-100">${tractor.name}</span>
-      </div>
-      <span class="text-xs text-slate-300">${distance} км</span>
-    `;
-    legend.appendChild(item);
+    const route = (appState.routes || []).find((item) => item.tractor?.id === tractor.id);
+    const distanceValue = Number(route?.distance_km ?? 0);
+    const wrapper = document.createElement("div");
+    wrapper.className = "flex items-center justify-between rounded-2xl bg-slate-800/60 px-4 py-3";
+
+    const left = document.createElement("div");
+    left.className = "flex items-center gap-3";
+    const colorDot = document.createElement("span");
+    colorDot.className = "inline-flex h-4 w-4 rounded-full";
+    colorDot.style.background = tractor.color;
+    const name = document.createElement("span");
+    name.className = "font-semibold text-slate-100";
+    name.textContent = tractor.name;
+    left.append(colorDot, name);
+
+    const distance = document.createElement("span");
+    distance.className = "text-xs text-slate-300";
+    distance.textContent = `${distanceValue.toFixed(1)} км`;
+
+    wrapper.append(left, distance);
+    legend.appendChild(wrapper);
   });
 };
 
 const renderLogs = () => {
   const container = qs("#log-entries");
-  container.innerHTML = "";
+  if (!container) return;
+  container.textContent = "";
   (appState.log || [])
     .slice()
     .reverse()
@@ -94,47 +156,97 @@ const renderLogs = () => {
           : "border-slate-700 bg-slate-800/60";
       const item = document.createElement("div");
       item.className = `rounded-2xl border ${severityClass} p-4 text-sm`;
-      item.innerHTML = `
-        <div class="flex items-center justify-between text-xs uppercase tracking-widest">
-          <span class="font-semibold text-slate-200">${entry.tractor || "Система"}</span>
-          <span class="text-slate-400">${new Date(entry.timestamp).toLocaleTimeString()}</span>
-        </div>
-        <div class="mt-2 text-slate-200">${entry.message || ""}</div>
-        <div class="mt-1 text-xs text-slate-400">
-          Сегментов: ${entry.segments ?? "—"} · Дистанция: ${entry.distance_km ?? "—"} км
-        </div>
-      `;
+
+      const header = document.createElement("div");
+      header.className = "flex items-center justify-between text-xs uppercase tracking-widest";
+      const actor = document.createElement("span");
+      actor.className = "font-semibold text-slate-200";
+      actor.textContent = entry.tractor || "Система";
+      const timestamp = document.createElement("span");
+      timestamp.className = "text-slate-400";
+      timestamp.textContent = entry.timestamp ? new Date(entry.timestamp).toLocaleTimeString() : "";
+      header.append(actor, timestamp);
+
+      const message = document.createElement("div");
+      message.className = "mt-2 text-slate-200";
+      message.textContent = entry.message || "";
+
+      const meta = document.createElement("div");
+      meta.className = "mt-1 text-xs text-slate-400";
+      const segments = entry.segments ?? "—";
+      const distanceValue =
+        typeof entry.distance_km === "number"
+          ? entry.distance_km.toFixed(1)
+          : entry.distance_km ?? "—";
+      meta.textContent = `Сегментов: ${segments} · Дистанция: ${distanceValue} км`;
+
+      item.append(header, message, meta);
       container.appendChild(item);
     });
 };
 
 const renderProgress = () => {
   const container = qs("#progress-container");
-  container.innerHTML = "";
+  if (!container) return;
+  container.textContent = "";
   const progress = appState.metadata?.progress || [];
   progress.forEach((item) => {
-    const percent = Math.min(100, Math.round((item.distance_km / item.limit_km) * 100));
+    const percent = Math.min(
+      100,
+      item.limit_km ? Math.round(((item.distance_km || 0) / item.limit_km) * 100) : 0,
+    );
     const row = document.createElement("div");
-    row.innerHTML = `
-      <div class="flex items-center justify-between text-xs text-slate-400">
-        <span>${item.tractor}</span>
-        <span>${item.distance_km.toFixed(1)} / ${item.limit_km.toFixed(1)} км</span>
-      </div>
-      <div class="mt-1 h-2 w-full overflow-hidden rounded-full bg-slate-800">
-        <div class="h-full rounded-full bg-emerald-400" style="width:${percent}%"></div>
-      </div>
-    `;
+    row.className = "space-y-1";
+
+    const header = document.createElement("div");
+    header.className = "flex items-center justify-between text-xs text-slate-400";
+    const name = document.createElement("span");
+    name.textContent = item.tractor || "—";
+    const distance = document.createElement("span");
+    const currentDistance = Number(item.distance_km || 0).toFixed(1);
+    const limitDistance = Number(item.limit_km || 0).toFixed(1);
+    distance.textContent = `${currentDistance} / ${limitDistance} км`;
+    header.append(name, distance);
+
+    const bar = document.createElement("div");
+    bar.className = "mt-1 h-2 w-full overflow-hidden rounded-full bg-slate-800";
+    const barFill = document.createElement("div");
+    barFill.className = "h-full rounded-full bg-emerald-400";
+    barFill.style.width = `${percent}%`;
+    bar.append(barFill);
+
+    row.append(header, bar);
     container.appendChild(row);
   });
+
   const eta = appState.metadata?.eta;
-  if (eta?.status === "running") {
-    qs("#routing-status").textContent = "Построение выполняется";
-    qs("#routing-eta").textContent = `${Math.round(eta.completion * 100)}%`;
-  } else {
-    qs("#routing-status").textContent = "Ожидание запуска";
-    qs("#routing-eta").textContent = "—";
+  const statusEl = qs("#routing-status");
+  const etaEl = qs("#routing-eta");
+  if (statusEl && etaEl) {
+    if (eta?.status === "running") {
+      statusEl.textContent = "Построение выполняется";
+      etaEl.textContent = `${Math.round((eta.completion || 0) * 100)}%`;
+    } else {
+      statusEl.textContent = "Ожидание запуска";
+      etaEl.textContent = "—";
+    }
   }
 };
+
+function updateMonitoringToggle() {
+  const button = qs("#toggle-monitoring");
+  if (!button) return;
+  const enabled = Boolean(appState.monitoring_enabled);
+  button.textContent = enabled ? "Отключить онлайн-мониторинг" : "Включить онлайн-мониторинг";
+  if (enabled) {
+    if (!monitoringTimer) {
+      startMonitoringLoop();
+    }
+  } else {
+    stopMonitoringLoop();
+    updateMonitoringPanel([]);
+  }
+}
 
 const applyNightMode = () => {
   document.body.classList.toggle("night", Boolean(appState.night_mode));
@@ -330,6 +442,7 @@ const refreshState = async () => {
   renderProgress();
   applyNightMode();
   setFieldValues();
+  updateMonitoringToggle();
   await redrawMap();
   applyFilter();
 };
@@ -341,6 +454,7 @@ const redrawMap = async () => {
   drawGrid(maps);
   drawRoutes(maps);
   drawBaseMarker(maps);
+  fitBoundsToData(maps);
 };
 
 const qsMap = () => map;
@@ -371,6 +485,7 @@ const initMap = async () => {
 };
 
 const fitBoundsToData = (maps) => {
+  if (!map) return;
   const bounds = new maps.LatLngBounds();
   let hasData = false;
   if (layers.polygon) {
@@ -394,11 +509,12 @@ const handleBuildGrid = async () => {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ divisions }),
   });
-  const data = await response.json();
-  appState.grid = data.grid;
-  appState.grid_assignments = {};
-  await redrawMap();
-  applyFilter();
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    alert(error.error || "Не удалось построить сетку. Проверьте данные GEO.kml.");
+    return;
+  }
+  await refreshState();
 };
 
 const handleAutoAssign = async () => {
@@ -413,11 +529,12 @@ const handleAutoAssign = async () => {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ mode: modes[0] || "combined" }),
   });
-  const data = await response.json();
-  if (data.roads) appState.assignments = data.roads;
-  if (data.grid) appState.grid_assignments = data.grid;
-  await redrawMap();
-  applyFilter();
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    alert(error.error || "Не удалось выполнить автораспределение.");
+    return;
+  }
+  await refreshState();
 };
 
 const handleConfigSave = async () => {
@@ -456,15 +573,23 @@ const handleKeyCheck = async () => {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ key }),
   });
-  const data = await response.json();
-  if (data.valid) {
-    qs("#google-status").textContent = "Google OK";
-    qs("#google-status").className = "font-semibold text-emerald-300";
-    appState.google_api_key = true;
-  } else {
-    qs("#google-status").textContent = `Ошибка: ${data.status || "неизвестно"}`;
-    qs("#google-status").className = "font-semibold text-red-300";
+  if (!response.ok) {
+    alert("Не удалось проверить ключ. Попробуйте позже.");
+    return;
   }
+  const data = await response.json();
+  appState.metadata = appState.metadata || {};
+  if (data.valid) {
+    appState.google_api_key = true;
+    appState.metadata.google_key_status = "ok";
+    appState.metadata.google_key_status_detail = data.status;
+  } else {
+    appState.google_api_key = false;
+    appState.metadata.google_key_status = "error";
+    appState.metadata.google_key_status_detail = data.status || "Ошибка";
+  }
+  updateGoogleStatus();
+  await refreshState();
 };
 
 const handleRouting = async () => {
@@ -487,12 +612,13 @@ const handleRouting = async () => {
     });
     const data = await response.json();
     appState.routes = data.routes;
-    appState.metadata = data.metadata;
+    appState.metadata = { ...(appState.metadata || {}), ...(data.metadata || {}) };
     appState.log = [...(appState.log || []), ...(data.log || [])];
     appState.last_run = data.timestamp;
     renderLogs();
     renderProgress();
     updateLegend();
+    updateGoogleStatus();
     qs("#last-run").textContent = new Date(data.timestamp).toLocaleString();
     await redrawMap();
     applyFilter();
@@ -537,10 +663,12 @@ const handleUpload = (type) => {
       method: "POST",
       body: formData,
     });
-    const data = await response.json();
-    Object.assign(appState, data.state);
-    await redrawMap();
-    applyFilter();
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      alert(error.error || "Не удалось загрузить файл KML.");
+      return;
+    }
+    await refreshState();
   });
   input.click();
 };
@@ -557,17 +685,12 @@ const handleMonitoringToggle = async () => {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ enabled }),
   });
-  const data = await response.json();
-  appState.monitoring_enabled = data.enabled;
-  qs("#toggle-monitoring").textContent = enabled
-    ? "Отключить онлайн-мониторинг"
-    : "Включить онлайн-мониторинг";
-  if (enabled) {
-    startMonitoringLoop();
-  } else {
-    stopMonitoringLoop();
-    updateMonitoringPanel([]);
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    alert(error.error || "Не удалось изменить состояние мониторинга.");
+    return;
   }
+  await refreshState();
 };
 
 const fetchMonitoring = async () => {
@@ -682,6 +805,7 @@ const handleSessionLoad = () => {
     updateLegend();
     updateFilterOptions();
     setFieldValues();
+    updateMonitoringToggle();
     input.value = "";
   });
 };
@@ -842,13 +966,7 @@ const init = async () => {
     });
   });
 
-  qs("#toggle-monitoring").textContent = appState.monitoring_enabled
-    ? "Отключить онлайн-мониторинг"
-    : "Включить онлайн-мониторинг";
-
-  if (appState.monitoring_enabled) {
-    startMonitoringLoop();
-  }
+  updateMonitoringToggle();
 };
 
 window.addEventListener("load", init);

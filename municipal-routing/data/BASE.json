@@ -1,11 +1,12 @@
 {
   "base_location": {
-    "lat": 55.755826,
-    "lng": 37.6173
+    "lat": 54.9099,
+    "lng": 37.3634
   },
   "tractors": [
-    { "id": "tractor-1", "name": "Трактор 1", "color": "#F97316" },
-    { "id": "tractor-2", "name": "Трактор 2", "color": "#3B82F6" },
-    { "id": "tractor-3", "name": "Трактор 3", "color": "#22C55E" }
+    { "id": "tractor-1", "name": "Трактор 1", "color": "#EF4444" },
+    { "id": "tractor-2", "name": "Трактор 2", "color": "#10B981" },
+    { "id": "tractor-3", "name": "Трактор 3", "color": "#3B82F6" },
+    { "id": "tractor-4", "name": "Трактор 4", "color": "#F59E0B" }
   ]
 }

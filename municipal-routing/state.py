@@ -118,7 +118,7 @@ def load_state(path: Path) -> AppState:
     base_config = _load_json(
         base_path,
         {
-            "base_location": {"lat": 55.7522, "lng": 37.6156},
+            "base_location": {"lat": 54.9099, "lng": 37.3634},
             "tractors": [
                 {"id": "tractor-1", "name": "Трактор 1", "color": TRACTOR_PALETTE[0]},
                 {"id": "tractor-2", "name": "Трактор 2", "color": TRACTOR_PALETTE[1]},
@@ -129,7 +129,7 @@ def load_state(path: Path) -> AppState:
     )
     session_data = _load_json(path, {})
     state = AppState(
-        base_location=base_config["base_location"],
+        base_location=session_data.get("base_location", base_config["base_location"]),
         tractors=base_config.get("tractors", []),
     )
     state.ensure_tractors(session_data.get("tractors_count") or len(state.tractors))
@@ -152,6 +152,7 @@ def load_state(path: Path) -> AppState:
 
 def save_state(state: AppState, path: Path) -> None:
     payload = {
+        "base_location": state.base_location,
         "assignments": state.assignments,
         "grid_assignments": state.grid_assignments,
         "grid": state.grid,

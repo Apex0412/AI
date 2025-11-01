@@ -27,6 +27,7 @@ app = Flask(
     static_folder=str(BASE_DIR / "static"),
 )
 app.config["JSON_SORT_KEYS"] = False
+app.config["JSON_AS_ASCII"] = False
 
 state: AppState = load_state(DATA_DIR / "session.json")
 loader = KMLDataLoader(DATA_DIR / "GEO.kml", DATA_DIR / "RoadCity.kml")
@@ -48,10 +49,20 @@ def _append_log(message: str, level: str = "INFO", tractor: Optional[str] = None
 
 
 def refresh_data() -> None:
-    city, roads = loader.load()
-    state.city_polygon = city
-    state.road_segments = roads
-    save_state(state, DATA_DIR / "session.json")
+    try:
+        city, roads = loader.load()
+    except Exception as exc:  # noqa: BLE001 - surface parsing issues to UI
+        state.city_polygon = None
+        state.road_segments = []
+        if state.metadata.get("kml_status") != "error":
+            _append_log(f"Ошибка чтения KML: {exc}", level="ERROR")
+        state.metadata["kml_status"] = "error"
+    else:
+        state.city_polygon = city
+        state.road_segments = roads
+        state.metadata["kml_status"] = "ok"
+    finally:
+        save_state(state, DATA_DIR / "session.json")
 
 
 @app.route("/")
@@ -97,7 +108,7 @@ def compute_routes():
     state.last_run = timestamp
     state.routes = result["routes"]
     state.log.extend(result.get("log", []))
-    state.metadata = result.get("metadata", {})
+    state.metadata.update(result.get("metadata", {}))
     save_state(state, DATA_DIR / "session.json")
     _append_log("Маршруты пересчитаны")
     return jsonify({"timestamp": timestamp, **result})
@@ -134,9 +145,15 @@ def set_google_key():
     if validation.get("valid"):
         state.google_api_key = key
         os.environ["GOOGLE_MAPS_JS_API_KEY"] = key
+        state.metadata["google_key_status"] = "ok"
+        state.metadata["google_key_status_detail"] = validation.get("status", "OK")
         save_state(state, DATA_DIR / "session.json")
         _append_log("Google API ключ подтверждён")
     else:
+        state.metadata["google_key_status"] = "error"
+        state.metadata["google_key_status_detail"] = (
+            validation.get("status") or validation.get("error") or "ERROR"
+        )
         _append_log("Ошибка проверки Google API ключа", level="ERROR")
     return jsonify(validation)
 
@@ -307,8 +324,9 @@ def upload_dataset(dataset: str):
     else:
         return jsonify({"error": "Неизвестный тип"}), 400
     file.save(target)
-    loader.geo_path = DATA_DIR / "GEO.kml"
-    loader.roads_path = DATA_DIR / "RoadCity.kml"
+    loader.city_path = DATA_DIR / "GEO.kml"
+    loader.road_path = DATA_DIR / "RoadCity.kml"
+    loader.invalidate()
     refresh_data()
     _append_log(f"Файл {filename} загружен")
     return jsonify({"status": "ok", "state": state.to_dict()})
