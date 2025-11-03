@@ -188,6 +188,7 @@ def load_state(path: Path) -> AppState:
     default_osrm = os.getenv("OSRM_BASE_URL", "https://router.project-osrm.org")
     default_ors = os.getenv("ORS_BASE_URL", "https://api.openrouteservice.org")
     default_graphhopper = os.getenv("GRAPHHOPPER_BASE_URL", "https://graphhopper.com/api/1")
+    enable_google_env = os.getenv("ENABLE_GOOGLE_SERVICES", "false").lower() == "true"
     state.google_api_key = session_data.get("google_api_key", os.getenv("GOOGLE_API_KEY", ""))
     state.yandex_api_key = session_data.get("yandex_api_key", os.getenv("YANDEX_API_KEY", ""))
     state.ors_api_key = session_data.get("ors_api_key", os.getenv("ORS_API_KEY", ""))
@@ -195,7 +196,7 @@ def load_state(path: Path) -> AppState:
     state.osrm_base_url = session_data.get("osrm_base_url", default_osrm)
     state.ors_base_url = session_data.get("ors_base_url", default_ors)
     state.graphhopper_base_url = session_data.get("graphhopper_base_url", default_graphhopper)
-    state.enable_google_services = session_data.get("enable_google_services", False)
+    state.enable_google_services = session_data.get("enable_google_services", enable_google_env)
     state.monitoring_enabled = session_data.get("monitoring_enabled", False)
     state.night_mode = session_data.get("night_mode", False)
     state.map_provider = session_data.get("map_provider", "yandex")

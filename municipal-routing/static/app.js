@@ -1,4 +1,4 @@
-const ENABLE_GOOGLE_SERVICES = false; // Включите true, чтобы вернуть Google Maps и сервисы
+const ENABLE_GOOGLE_SERVICES = Boolean(window.__ENABLE_GOOGLE__);
 const appState = window.__INITIAL_STATE__ || {};
 const availableProviders = ["yandex", "osm"];
 if (ENABLE_GOOGLE_SERVICES) availableProviders.push("google");
@@ -90,6 +90,18 @@ const formatLatLng = ({ lat, lng }) => `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
 
 const qs = (selector) => document.querySelector(selector);
 const qsa = (selector) => Array.from(document.querySelectorAll(selector));
+
+const applyGoogleVisibility = () => {
+  const googleElements = qsa('[data-google-only]');
+  if (!googleElements.length) return;
+  if (ENABLE_GOOGLE_SERVICES) {
+    googleElements.forEach((el) => el.classList.remove('hidden'));
+  } else {
+    googleElements.forEach((el) => el.remove());
+  }
+};
+
+applyGoogleVisibility();
 const stripProtocol = (url) => (typeof url === "string" ? url.replace(/^https?:\/\//, "") : "");
 const isLocalUrl = (url) =>
   typeof url === "string" && /^(https?:\/\/)?(localhost|127\.|0\.0\.0\.0)/i.test(url);
@@ -1021,10 +1033,17 @@ const handleConfigSave = async () => {
 
 const handleKeyCheck = async () => {
   if (!ENABLE_GOOGLE_SERVICES) {
-    alert("Интеграция с Google API отключена. Установите ENABLE_GOOGLE_SERVICES = true в app.js, чтобы активировать.");
+    alert(
+      "Интеграция с Google API отключена. Установите ENABLE_GOOGLE_SERVICES=true в .env и перезапустите сервер."
+    );
     return;
   }
-  const key = qs("#google-key").value.trim();
+  const keyInput = qs("#google-key");
+  if (!keyInput) {
+    alert("Поля Google API скрыты. Включите поддержку Google и обновите страницу.");
+    return;
+  }
+  const key = keyInput.value.trim();
   if (!key) return;
   const response = await fetch("/api/google-key", {
     method: "POST",
@@ -1426,7 +1445,10 @@ const init = async () => {
   qs("#build-grid").addEventListener("click", handleBuildGrid);
   qs("#auto-assign").addEventListener("click", handleAutoAssign);
   qs("#run-routing").addEventListener("click", handleRouting);
-  qs("#check-key").addEventListener("click", handleKeyCheck);
+  const checkKeyButton = qs("#check-key");
+  if (checkKeyButton) {
+    checkKeyButton.addEventListener("click", handleKeyCheck);
+  }
   qs("#reset-assignments").addEventListener("click", handleResetAssignments);
   qs("#toggle-monitoring").addEventListener("click", handleMonitoringToggle);
   qs("#save-session").addEventListener("click", handleSessionSave);

@@ -88,7 +88,7 @@
                 </label>
               </div>
               <div id="advanced-block" class="hidden space-y-3 text-sm">
-                <label class="field">
+                <label class="field hidden" data-google-only>
                   <span>Google API Key</span>
                   <div class="flex gap-2">
                     <input id="google-key" type="text" placeholder="AIza..." class="flex-1" />
@@ -121,11 +121,11 @@
                   <span>OpenRouteService Base URL</span>
                   <input id="ors-base-url" type="text" placeholder="https://api.openrouteservice.org" />
                 </label>
-                <div class="flex items-center justify-between text-xs text-slate-400">
+                <div class="flex items-center justify-between text-xs text-slate-400 hidden" data-google-only>
                   <span>Статус ключа</span>
                   <span id="google-status" class="font-semibold text-amber-300">Не проверен</span>
                 </div>
-                <label class="flex items-center gap-3 text-xs text-slate-300">
+                <label class="flex items-center gap-3 text-xs text-slate-300 hidden" data-google-only>
                   <input id="enable-google" type="checkbox" class="accent-emerald-400" />
                   Разрешить использование Google API (после разблокировки)
                 </label>
@@ -133,7 +133,7 @@
                   <span>Провайдер карты</span>
                   <select id="map-provider">
                     <option value="yandex">Yandex Maps</option>
-                    <option value="google">Google Maps</option>
+                    <option value="google" data-google-only>Google Maps</option>
                     <option value="osm">OpenStreetMap</option>
                   </select>
                 </label>
@@ -226,11 +226,11 @@
                   <input type="checkbox" id="layer-routes" class="accent-emerald-400" checked />
                   Маршруты
                 </label>
-                <label class="flex items-center gap-2">
+                <label class="flex items-center gap-2 hidden" data-google-only>
                   <input type="checkbox" id="layer-places" class="accent-emerald-400" />
                   Места (Places API)
                 </label>
-                <label class="flex items-center gap-2">
+                <label class="flex items-center gap-2 hidden" data-google-only>
                   <input type="checkbox" id="layer-elevation" class="accent-emerald-400" />
                   Высоты (Elevation)
                 </label>
@@ -295,12 +295,8 @@
               <div class="flex items-center gap-3">
                 <span id="api-status-indicator" class="status-indicator status-pending">✓</span>
                 <div class="text-right">
-                  <p id="api-status-label" class="text-xs font-semibold text-amber-300">
-                    Google API не проверен
-                  </p>
-                  <p id="api-status-caption" class="text-[11px] text-slate-400">
-                    Нажмите "Проверить" для подтверждения
-                  </p>
+                  <p id="api-status-label" class="text-xs font-semibold text-amber-300">Проверка API</p>
+                  <p id="api-status-caption" class="text-[11px] text-slate-400">Статус загрузки сервисов</p>
                 </div>
               </div>
             </div>
@@ -366,6 +362,7 @@
 
     <script>
       window.__INITIAL_STATE__ = {{ state | tojson }};
+      window.__ENABLE_GOOGLE__ = {{ enable_google_flag | tojson }};
     </script>
     <script
       src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
@@ -373,10 +370,12 @@
       crossorigin=""
     ></script>
     <script src="{{ url_for('static', filename='app.js') }}" type="module"></script>
-    {% if google_maps_key %}
+    {% if enable_google_flag %}
+      {% if google_maps_key %}
     <script src="https://maps.googleapis.com/maps/api/js?key={{ google_maps_key }}&libraries=places" async defer></script>
-    {% else %}
+      {% else %}
     <script src="https://maps.googleapis.com/maps/api/js?libraries=places" async defer></script>
+      {% endif %}
     {% endif %}
   </body>
 </html>

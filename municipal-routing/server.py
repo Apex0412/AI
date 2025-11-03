@@ -16,6 +16,8 @@ from state import AppState, load_state, save_state
 
 load_dotenv()
 
+ENABLE_GOOGLE_FLAG = os.getenv("ENABLE_GOOGLE_SERVICES", "false").lower() == "true"
+
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "data"
 EXPORT_DIR = DATA_DIR / "exports"
@@ -74,6 +76,7 @@ def index() -> str:
         "index.html",
         google_maps_key=google_maps_key,
         yandex_maps_key=yandex_maps_key,
+        enable_google_flag=ENABLE_GOOGLE_FLAG,
         state=state.to_dict(),
     )
 
