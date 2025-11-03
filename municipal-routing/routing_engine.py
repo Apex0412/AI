@@ -1,14 +1,27 @@
 from __future__ import annotations
 
+import os
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List
 
 from shapely.geometry import LineString, Polygon, box, mapping, shape
 
-from google_client import GoogleClient
+from google_client import GoogleClient  # noqa: F401  # сохраняем возможность вернуть Google при необходимости
 from kml_utils import KMLDataLoader, export_geojson as export_geojson_file
+from routing_providers import (
+    OSRMClient,
+    OpenRouteServiceClient,
+    compute_transition,
+    decode_ors_distance,
+    decode_ors_duration,
+    decode_osrm_distance,
+    decode_osrm_duration,
+)
 from state import AppState
+from yandex_client import YandexClient
+
+ENABLE_GOOGLE_SERVICES = os.getenv("ENABLE_GOOGLE_SERVICES", "false").lower() == "true"
 
 
 class RoutingEngine:
@@ -41,11 +54,25 @@ class RoutingEngine:
         if not self.state.grid_assignments and self.state.grid:
             self.state.grid_assignments = self.auto_assign_grid(self.state.grid)
 
-        google_client = GoogleClient({**google_keys, "default": google_keys.get("directions", "")})
+        enable_google = bool(options.get("enable_google_services", self.state.enable_google_services))
+        enable_google = enable_google and ENABLE_GOOGLE_SERVICES
+        self.state.enable_google_services = enable_google
+
+        ors_key = options.get("ors_api_key") or self.state.ors_api_key or os.getenv("ORS_API_KEY", "")
+        yandex_key = options.get("yandex_api_key") or self.state.yandex_api_key or os.getenv("YANDEX_API_KEY", "")
+
+        osrm_client = OSRMClient()
+        ors_client = OpenRouteServiceClient(api_key=ors_key)
+        yandex_client = YandexClient(api_key=yandex_key)
+
+        # Для повторного подключения Google API достаточно установить ENABLE_GOOGLE_SERVICES = True
+        # и передавать ключи. Прежняя интеграция сохранена ниже в комментариях.
+        # google_client = GoogleClient({**google_keys, "default": google_keys.get("directions", "")})
         routes: List[Dict] = []
         log_entries: List[Dict] = []
         progress: List[Dict] = []
         base = self.state.base_location
+        base_coords = [base["lng"], base["lat"]]
         base_str = f"{base['lat']},{base['lng']}"
 
         segment_lookup = {seg["id"]: seg for seg in road_segments}
@@ -71,12 +98,13 @@ class RoutingEngine:
                 "metadata": [],
             }
             previous_point = base_str
+            previous_point_coords = base_coords[:]
             for seg_id in assigned_ids:
                 segment = segment_lookup.get(seg_id)
                 if not segment:
                     continue
                 geometry = segment["geometry"]
-                coords = geometry.get("coordinates")
+                coords = [[c[0], c[1]] for c in geometry.get("coordinates", [])]
                 if not coords:
                     continue
                 start = coords[0]
@@ -84,20 +112,49 @@ class RoutingEngine:
                 start_str = f"{start[1]},{start[0]}"
                 end_str = f"{end[1]},{end[0]}"
 
-                transition = google_client.directions(
-                    previous_point,
-                    start_str,
-                    mode=self.state.travel_mode,
-                    max_waypoints=self.state.max_waypoints,
-                )
-                snapped = google_client.snap_to_roads([f"{c[1]},{c[0]}" for c in coords])
-                elevation = google_client.elevation([start_str, end_str])
-                geocode = google_client.geocode(start_str)
-                places = google_client.places_nearby(start_str)
-                timezone = google_client.time_zone(start_str, int(datetime.utcnow().timestamp()))
+                # Переходы строятся через OSRM / OpenRouteService. Прежний вызов Google Directions оставлен ниже
+                # в комментариях.
+                start_coord = [start[0], start[1]]
+                end_coord = [end[0], end[1]]
 
-                transition_distance = self._extract_distance(transition)
-                transition_duration = self._extract_duration(transition)
+                transition = compute_transition(
+                    previous_point_coords,
+                    start_coord,
+                    self.state.travel_mode,
+                    osrm_client,
+                    ors_client,
+                )
+
+                if transition.get("source") == "osrm":
+                    transition_distance = decode_osrm_distance(transition)
+                    transition_duration = decode_osrm_duration(transition)
+                else:
+                    transition_distance = decode_ors_distance(transition)
+                    transition_duration = decode_ors_duration(transition)
+
+                profile_map = {
+                    "walking": ("foot", "foot-walking"),
+                    "bicycling": ("bike", "cycling-regular"),
+                }
+                osrm_profile, _ = profile_map.get(self.state.travel_mode, ("driving", "driving-car"))
+
+                snapped = osrm_client.match(coords, profile=osrm_profile)
+                elevation = ors_client.elevation_line(coords) if ors_key else {"status": "SKIPPED"}
+                geocode = yandex_client.geocode(f"{start[0]},{start[1]}") if yandex_client.api_key else {}
+                places = yandex_client.suggest(segment.get("name", start_str)) if yandex_client.api_key else {}
+                timezone = {
+                    "service": "yandex_time_zone",
+                    "note": "Используйте Time Zone API для детальных данных",
+                }
+
+                # if enable_google:
+                #     google_transition = google_client.directions(
+                #         previous_point,
+                #         start_str,
+                #         mode=self.state.travel_mode,
+                #         max_waypoints=self.state.max_waypoints,
+                #     )
+                #     transition.setdefault("google_directions", google_transition)
                 seg_distance = self._line_length_km(LineString([(c[0], c[1]) for c in coords]))
 
                 tractor_route["segments"].append(
@@ -110,6 +167,7 @@ class RoutingEngine:
                         "geocode": geocode,
                         "places": places,
                         "timezone": timezone,
+                        "routing_engine": transition.get("source", "ors"),
                         "segment_distance_km": seg_distance,
                     }
                 )
@@ -118,6 +176,7 @@ class RoutingEngine:
                         "from": previous_point,
                         "to": start_str,
                         "directions": transition,
+                        "provider": transition.get("source", "ors"),
                         "distance_km": transition_distance,
                         "duration_min": transition_duration,
                     }
@@ -125,6 +184,7 @@ class RoutingEngine:
                 tractor_route["distance_km"] += transition_distance + seg_distance
                 tractor_route["duration_min"] += transition_duration
                 previous_point = end_str
+                previous_point_coords = end_coord
 
                 if tractor_route["distance_km"] >= self.state.route_limit_km:
                     log_entries.append(

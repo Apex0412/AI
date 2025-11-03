@@ -1,5 +1,10 @@
+const ENABLE_GOOGLE_SERVICES = false; // Включите true, чтобы вернуть Google Maps и сервисы
 const appState = window.__INITIAL_STATE__ || {};
-appState.map_provider = appState.map_provider === "osm" ? "osm" : "google";
+const availableProviders = ["yandex", "osm"];
+if (ENABLE_GOOGLE_SERVICES) availableProviders.push("google");
+appState.map_provider = availableProviders.includes(appState.map_provider)
+  ? appState.map_provider
+  : "yandex";
 let map;
 let mapProvider = appState.map_provider;
 let mapLibrary = null;
@@ -50,10 +55,31 @@ const waitForLeaflet = () =>
   });
 
 const isGoogleProvider = () => mapProvider === "google";
+const isYandexProvider = () => mapProvider === "yandex";
+
+const waitForYandex = () =>
+  new Promise((resolve) => {
+    if (window.ymaps && window.ymaps.ready) {
+      window.ymaps.ready(() => resolve(window.ymaps));
+      return;
+    }
+    const interval = setInterval(() => {
+      if (window.ymaps && window.ymaps.ready) {
+        clearInterval(interval);
+        window.ymaps.ready(() => resolve(window.ymaps));
+      }
+    }, 100);
+  });
 
 const ensureMapLibrary = async () => {
   if (mapLibrary) return mapLibrary;
-  mapLibrary = isGoogleProvider() ? await waitForGoogle() : await waitForLeaflet();
+  if (isGoogleProvider()) {
+    mapLibrary = await waitForGoogle();
+  } else if (isYandexProvider()) {
+    mapLibrary = await waitForYandex();
+  } else {
+    mapLibrary = await waitForLeaflet();
+  }
   return mapLibrary;
 };
 
@@ -73,12 +99,30 @@ const setFieldValues = () => {
   qs("#simplify-routes").checked = false;
   const providerSelect = qs("#map-provider");
   if (providerSelect) {
-    providerSelect.value = appState.map_provider || "google";
+    const desired = availableProviders.includes(appState.map_provider)
+      ? appState.map_provider
+      : availableProviders[0];
+    providerSelect.value = desired;
+    const googleOption = providerSelect.querySelector('option[value="google"]');
+    if (googleOption) {
+      googleOption.disabled = !ENABLE_GOOGLE_SERVICES;
+      googleOption.hidden = !ENABLE_GOOGLE_SERVICES;
+    }
+  }
+  const yandexInput = qs("#yandex-key");
+  if (yandexInput) yandexInput.value = "";
+  const orsInput = qs("#ors-key");
+  if (orsInput) orsInput.value = "";
+  const enableGoogleToggle = qs("#enable-google");
+  if (enableGoogleToggle) {
+    enableGoogleToggle.checked = Boolean(appState.enable_google_services && ENABLE_GOOGLE_SERVICES);
+    enableGoogleToggle.disabled = !ENABLE_GOOGLE_SERVICES;
   }
   updateGoogleStatus();
 };
 
 function computeGoogleStatus() {
+  if (!ENABLE_GOOGLE_SERVICES || !appState.enable_google_services) return "disabled";
   const metaStatus = appState.metadata?.google_key_status;
   if (metaStatus === "error") return "error";
   if (metaStatus === "ok" || appState.google_api_key) return "ok";
@@ -97,6 +141,9 @@ function updateGoogleStatus() {
     } else if (status === "error") {
       text = "Ошибка доступа";
       colorClass = "text-red-400";
+    } else if (status === "disabled") {
+      text = "Отключено";
+      colorClass = "text-slate-500";
     }
     googleStatusEl.textContent = text;
     googleStatusEl.className = `font-semibold ${colorClass}`;
@@ -107,8 +154,13 @@ function updateGoogleStatus() {
   const indicatorCaption = qs("#api-status-caption");
   const detail = appState.metadata?.google_key_status_detail;
   if (indicator) {
-    indicator.className = `status-indicator status-${status}`;
-    indicator.textContent = "✓";
+    if (status === "disabled") {
+      indicator.className = "status-indicator status-disabled";
+      indicator.textContent = "–";
+    } else {
+      indicator.className = `status-indicator status-${status}`;
+      indicator.textContent = "✓";
+    }
   }
   if (indicatorLabel) {
     if (status === "ok") {
@@ -123,6 +175,11 @@ function updateGoogleStatus() {
         indicatorCaption.textContent = detail
           ? `Ошибка: ${detail}`
           : "Проверьте ключ в настройках";
+    } else if (status === "disabled") {
+      indicatorLabel.textContent = "Google API отключён";
+      indicatorLabel.className = "text-xs font-semibold text-slate-400";
+      if (indicatorCaption)
+        indicatorCaption.textContent = "Разрешите использование Google API, чтобы активировать интеграцию";
     } else {
       indicatorLabel.textContent = "Google API не проверен";
       indicatorLabel.className = "text-xs font-semibold text-amber-300";
@@ -290,6 +347,14 @@ const removeOverlay = (overlay, provider = mapProvider) => {
       map.removeLayer(overlay);
     }
     overlay.remove?.();
+  } else if (provider === "yandex") {
+    const collection = map?.geoObjects;
+    if (collection) {
+      const index = collection.indexOf(overlay);
+      if (index !== -1) {
+        collection.remove(overlay);
+      }
+    }
   }
 };
 
@@ -321,6 +386,15 @@ const setOverlayVisibility = (overlay, visible) => {
   if (!overlay) return;
   if (isGoogleProvider()) {
     overlay.setMap?.(visible ? map : null);
+  } else if (isYandexProvider()) {
+    if (!map?.geoObjects) return;
+    const collection = map.geoObjects;
+    const index = collection.indexOf(overlay);
+    if (visible && index === -1) {
+      collection.add(overlay);
+    } else if (!visible && index !== -1) {
+      collection.remove(overlay);
+    }
   } else if (map) {
     const hasLayer = map.hasLayer?.(overlay);
     if (visible && !hasLayer) {
@@ -353,6 +427,16 @@ const drawPolygon = (lib) => {
       fillOpacity: 0.08,
     });
     layers.polygon.setMap(map);
+  } else if (isYandexProvider()) {
+    const latLngs = coords.map(({ lat, lng }) => [lat, lng]);
+    layers.polygon = new lib.Polygon([latLngs], {
+      fillColor: "#0EA5E9",
+      fillOpacity: 0.08,
+      strokeColor: "#38BDF8",
+      strokeOpacity: 0.7,
+      strokeWidth: 2,
+    });
+    map.geoObjects.add(layers.polygon);
   } else {
     const latLngs = coords.map(({ lat, lng }) => [lat, lng]);
     layers.polygon = lib.polygon(latLngs, {
@@ -389,6 +473,18 @@ const drawBaseMarker = (lib) => {
       title: "База",
     });
     layers.base.setMap(map);
+  } else if (isYandexProvider()) {
+    layers.base = new lib.Placemark(
+      [appState.base_location.lat, appState.base_location.lng],
+      {
+        balloonContent: "Базовая точка",
+      },
+      {
+        iconColor: "#FACC15",
+        preset: "islands#circleIcon",
+      },
+    );
+    map.geoObjects.add(layers.base);
   } else {
     layers.base = lib.circleMarker([appState.base_location.lat, appState.base_location.lng], {
       radius: 8,
@@ -424,6 +520,20 @@ const drawRoads = (lib) => {
       layers.roads.push(polyline);
       layers.roadMeta.set(polyline, segment);
       lib.event.addListener(polyline, "click", (event) => handleMapClick("road", segment, event.latLng));
+    } else if (isYandexProvider()) {
+      const coords = segment.geometry.coordinates.map(([lng, lat]) => [lat, lng]);
+      const polyline = new lib.Polyline(coords, {
+        strokeColor: color,
+        strokeOpacity: assignedTractor ? 0.85 : 0.5,
+        strokeWidth: assignedTractor ? 4 : 2,
+      });
+      map.geoObjects.add(polyline);
+      polyline.events.add("click", (event) => {
+        const [lat, lng] = event.get("coords");
+        handleMapClick("road", segment, { lat, lng });
+      });
+      layers.roads.push(polyline);
+      layers.roadMeta.set(polyline, segment);
     } else {
       const coords = segment.geometry.coordinates.map(([lng, lat]) => [lat, lng]);
       const polyline = lib.polyline(coords, {
@@ -459,6 +569,22 @@ const drawGrid = (lib) => {
       layers.grid.push(polygon);
       layers.gridMeta.set(polygon, cell);
       lib.event.addListener(polygon, "click", (event) => handleMapClick("grid", cell, event.latLng));
+    } else if (isYandexProvider()) {
+      const coords = cell.geometry.coordinates[0].map(([lng, lat]) => [lat, lng]);
+      const polygon = new lib.Polygon([coords], {
+        strokeColor: color,
+        strokeOpacity: 0.4,
+        strokeWidth: 1,
+        fillColor: color,
+        fillOpacity: assignment ? 0.18 : 0.05,
+      });
+      map.geoObjects.add(polygon);
+      polygon.events.add("click", (event) => {
+        const [lat, lng] = event.get("coords");
+        handleMapClick("grid", cell, { lat, lng });
+      });
+      layers.grid.push(polygon);
+      layers.gridMeta.set(polygon, cell);
     } else {
       const coords = cell.geometry.coordinates[0].map(([lng, lat]) => [lat, lng]);
       const polygon = lib.polygon(coords, {
@@ -491,6 +617,16 @@ const drawRoutes = (lib) => {
           strokeWeight: 4,
         });
         polyline.setMap(map);
+        layers.routes.push(polyline);
+        layers.routeMeta.push({ polyline, route, segment });
+      } else if (isYandexProvider()) {
+        const coords = segment.geometry.coordinates.map(([lng, lat]) => [lat, lng]);
+        const polyline = new lib.Polyline(coords, {
+          strokeColor: color,
+          strokeOpacity: 0.9,
+          strokeWidth: 4,
+        });
+        map.geoObjects.add(polyline);
         layers.routes.push(polyline);
         layers.routeMeta.push({ polyline, route, segment });
       } else {
@@ -590,6 +726,9 @@ const destroyMapInstance = (provider = mapProvider) => {
   if (provider === "osm" && typeof map.remove === "function") {
     map.remove();
   }
+  if (provider === "yandex" && typeof map.destroy === "function") {
+    map.destroy();
+  }
   if (provider === "google") {
     const mapEl = document.getElementById("map");
     if (mapEl) {
@@ -610,6 +749,15 @@ const fitBoundsToData = (lib) => {
       const bounds = new lib.LatLngBounds();
       polygonCoords.forEach(([lng, lat]) => bounds.extend({ lat, lng }));
       map.fitBounds(bounds);
+    } else if (isYandexProvider()) {
+      const latLngs = polygonCoords.map(([lng, lat]) => [lat, lng]);
+      const lats = latLngs.map(([lat]) => lat);
+      const lngs = latLngs.map(([, lng]) => lng);
+      const bounds = [
+        [Math.min(...lats), Math.min(...lngs)],
+        [Math.max(...lats), Math.max(...lngs)],
+      ];
+      map.setBounds(bounds, { checkZoomRange: true });
     } else {
       const latLngs = polygonCoords.map(([lng, lat]) => [lat, lng]);
       if (latLngs.length === 1) {
@@ -624,6 +772,8 @@ const fitBoundsToData = (lib) => {
     if (isGoogleProvider()) {
       map.setCenter(appState.base_location);
       map.setZoom(13);
+    } else if (isYandexProvider()) {
+      map.setCenter([appState.base_location.lat, appState.base_location.lng], 13);
     } else {
       map.setView([appState.base_location.lat, appState.base_location.lng], map.getZoom() || 13);
     }
@@ -639,7 +789,9 @@ const redrawMap = async () => {
   drawRoutes(lib);
   drawBaseMarker(lib);
   fitBoundsToData(lib);
-  if (!isGoogleProvider()) {
+  if (isYandexProvider()) {
+    map.container.fitToViewport();
+  } else if (!isGoogleProvider()) {
     map.invalidateSize?.();
   }
 };
@@ -665,6 +817,23 @@ const initMap = async () => {
           ]
         : undefined,
     });
+  } else if (isYandexProvider()) {
+    await new Promise((resolve) => lib.ready(resolve));
+    if (map && typeof map.destroy === "function") {
+      map.destroy();
+    }
+    map = new lib.Map(
+      mapElement,
+      {
+        center: [center.lat, center.lng],
+        zoom: 13,
+        controls: [],
+      },
+      {
+        suppressMapOpenBlock: true,
+      },
+    );
+    map.controls.add("zoomControl");
   } else {
     if (map && typeof map.remove === "function") {
       map.remove();
@@ -686,7 +855,10 @@ const initMap = async () => {
 };
 
 const ensureMapProvider = async () => {
-  const desired = appState.map_provider === "osm" ? "osm" : "google";
+  let desired = appState.map_provider;
+  if (!availableProviders.includes(desired)) {
+    desired = ENABLE_GOOGLE_SERVICES ? "google" : "yandex";
+  }
   appState.map_provider = desired;
   if (mapProvider !== desired) {
     destroyMapInstance(mapProvider);
@@ -762,8 +934,19 @@ const handleConfigSave = async () => {
       lng: Number(qs("#base-lng").value) || currentBase.lng,
     },
     night_mode: qs("#night-mode").checked,
-    map_provider: qs("#map-provider")?.value || appState.map_provider || "google",
+    map_provider: qs("#map-provider")?.value || appState.map_provider || "yandex",
   };
+  payload.enable_google_services = Boolean(
+    ENABLE_GOOGLE_SERVICES && qs("#enable-google")?.checked,
+  );
+  const yandexKey = qs("#yandex-key")?.value.trim();
+  if (yandexKey) {
+    payload.yandex_api_key = yandexKey;
+  }
+  const orsKey = qs("#ors-key")?.value.trim();
+  if (orsKey) {
+    payload.ors_api_key = orsKey;
+  }
   const response = await fetch("/api/config", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -780,6 +963,10 @@ const handleConfigSave = async () => {
 };
 
 const handleKeyCheck = async () => {
+  if (!ENABLE_GOOGLE_SERVICES) {
+    alert("Интеграция с Google API отключена. Установите ENABLE_GOOGLE_SERVICES = true в app.js, чтобы активировать.");
+    return;
+  }
   const key = qs("#google-key").value.trim();
   if (!key) return;
   const response = await fetch("/api/google-key", {

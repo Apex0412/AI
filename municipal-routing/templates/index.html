@@ -5,6 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Municipal Routing Control Center</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    {% if yandex_maps_key %}
+    <script src="https://api-maps.yandex.ru/2.1/?apikey={{ yandex_maps_key }}&lang=ru_RU"></script>
+    {% else %}
+    <script src="https://api-maps.yandex.ru/2.1/?lang=ru_RU"></script>
+    {% endif %}
     <link
       rel="stylesheet"
       href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
@@ -25,8 +30,8 @@
             <header class="space-y-2">
               <h1 class="text-2xl font-semibold tracking-tight text-slate-50">Маршрутизация тракторов</h1>
               <p class="text-sm text-slate-400 leading-relaxed">
-                Управляйте параметрами маршрутизации, назначайте зоны и запускайте построение маршрутов через
-                Google Maps Platform.
+                Управляйте параметрами маршрутизации, назначайте зоны и запускайте построение маршрутов через сервисы
+                Яндекс.Карт, OSRM и OpenRouteService. Google Maps можно включить отдельно при необходимости.
               </p>
               <div class="grid grid-cols-2 gap-4 text-xs uppercase tracking-widest text-slate-400">
                 <div class="rounded-2xl bg-slate-800/60 p-4">
@@ -92,13 +97,26 @@
                     </button>
                   </div>
                 </label>
+                <label class="field">
+                  <span>Yandex API Key</span>
+                  <input id="yandex-key" type="text" placeholder="YANDEX_MAP_KEY" />
+                </label>
+                <label class="field">
+                  <span>OpenRouteService API Key</span>
+                  <input id="ors-key" type="text" placeholder="ORS-..." />
+                </label>
                 <div class="flex items-center justify-between text-xs text-slate-400">
                   <span>Статус ключа</span>
                   <span id="google-status" class="font-semibold text-amber-300">Не проверен</span>
                 </div>
+                <label class="flex items-center gap-3 text-xs text-slate-300">
+                  <input id="enable-google" type="checkbox" class="accent-emerald-400" />
+                  Разрешить использование Google API (после разблокировки)
+                </label>
                 <label class="field">
                   <span>Провайдер карты</span>
                   <select id="map-provider">
+                    <option value="yandex">Yandex Maps</option>
                     <option value="google">Google Maps</option>
                     <option value="osm">OpenStreetMap</option>
                   </select>
@@ -316,9 +334,10 @@
             <button id="close-help" class="ghost-btn">Закрыть</button>
           </div>
           <p>
-            Используйте панель слева для настройки параметров Google API, сетки, режимов распределения и построения
-            маршрутов. В правой панели отображаются логи выполнения и мониторинг в реальном времени. Экспортируйте
-            результаты в KML, GeoJSON или PDF, а также сохраняйте и загружайте сессии для продолжения работы.
+            Используйте панель слева для настройки параметров карт и сервисов (Яндекс, OpenStreetMap, OSRM/ORS),
+            сетки, режимов распределения и построения маршрутов. В правой панели отображаются логи выполнения и
+            мониторинг в реальном времени. Экспортируйте результаты в KML, GeoJSON или PDF, а также сохраняйте и
+            загружайте сессии для продолжения работы.
           </p>
           <ul class="list-disc pl-4 text-slate-400">
             <li>Клик по зоне или дорожному сегменту открывает окно назначения трактора.</li>

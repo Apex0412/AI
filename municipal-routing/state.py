@@ -43,9 +43,12 @@ class AppState:
     max_waypoints: int = 23
     tractors_count: int = 4
     google_api_key: str = ""
+    yandex_api_key: str = ""
+    ors_api_key: str = ""
+    enable_google_services: bool = False
     monitoring_enabled: bool = False
     night_mode: bool = False
-    map_provider: str = "google"
+    map_provider: str = "yandex"
 
     def ensure_tractors(self, count: int) -> None:
         if count < 1:
@@ -109,6 +112,9 @@ class AppState:
             "max_waypoints": self.max_waypoints,
             "tractors_count": self.tractors_count,
             "google_api_key": bool(self.google_api_key),
+            "yandex_api_key": bool(self.yandex_api_key),
+            "ors_api_key": bool(self.ors_api_key),
+            "enable_google_services": self.enable_google_services,
             "monitoring_enabled": self.monitoring_enabled,
             "night_mode": self.night_mode,
             "map_provider": self.map_provider,
@@ -147,9 +153,12 @@ def load_state(path: Path) -> AppState:
     state.max_waypoints = session_data.get("max_waypoints", 23)
     state.tractors_count = session_data.get("tractors_count", len(state.tractors))
     state.google_api_key = session_data.get("google_api_key", "")
+    state.yandex_api_key = session_data.get("yandex_api_key", "")
+    state.ors_api_key = session_data.get("ors_api_key", "")
+    state.enable_google_services = session_data.get("enable_google_services", False)
     state.monitoring_enabled = session_data.get("monitoring_enabled", False)
     state.night_mode = session_data.get("night_mode", False)
-    state.map_provider = session_data.get("map_provider", "google")
+    state.map_provider = session_data.get("map_provider", "yandex")
     return state
 
 
@@ -168,6 +177,9 @@ def save_state(state: AppState, path: Path) -> None:
         "max_waypoints": state.max_waypoints,
         "tractors_count": state.tractors_count,
         "google_api_key": state.google_api_key,
+        "yandex_api_key": state.yandex_api_key,
+        "ors_api_key": state.ors_api_key,
+        "enable_google_services": state.enable_google_services,
         "monitoring_enabled": state.monitoring_enabled,
         "night_mode": state.night_mode,
         "map_provider": state.map_provider,

@@ -69,9 +69,11 @@ def refresh_data() -> None:
 def index() -> str:
     refresh_data()
     google_maps_key = state.google_api_key or os.getenv("GOOGLE_MAPS_JS_API_KEY", "")
+    yandex_maps_key = state.yandex_api_key or os.getenv("YANDEX_MAPS_JS_API_KEY", os.getenv("YANDEX_API_KEY", ""))
     return render_template(
         "index.html",
         google_maps_key=google_maps_key,
+        yandex_maps_key=yandex_maps_key,
         state=state.to_dict(),
     )
 
@@ -92,6 +94,9 @@ def compute_routes():
         "max_waypoints": body.get("max_waypoints", state.max_waypoints),
         "base_location": body.get("base_location", state.base_location),
         "grid_size": body.get("grid_size", len(state.grid) or state.tractors_count * 4),
+        "enable_google_services": body.get("enable_google_services", state.enable_google_services),
+        "yandex_api_key": body.get("yandex_api_key", state.yandex_api_key),
+        "ors_api_key": body.get("ors_api_key", state.ors_api_key),
     }
     google_keys = {
         "directions": state.google_api_key or os.getenv("GOOGLE_DIRECTIONS_API_KEY", os.getenv("GOOGLE_API_KEY", "")),
@@ -129,9 +134,15 @@ def update_config():
         state.max_waypoints = int(payload["max_waypoints"])
     if "night_mode" in payload:
         state.night_mode = bool(payload["night_mode"])
+    if "enable_google_services" in payload:
+        state.enable_google_services = bool(payload["enable_google_services"])
+    if "yandex_api_key" in payload:
+        state.yandex_api_key = payload["yandex_api_key"]
+    if "ors_api_key" in payload:
+        state.ors_api_key = payload["ors_api_key"]
     if "map_provider" in payload:
         provider = str(payload["map_provider"]).lower()
-        if provider in {"google", "osm"}:
+        if provider in {"google", "osm", "yandex"}:
             state.map_provider = provider
     save_state(state, DATA_DIR / "session.json")
     _append_log("Обновлены параметры маршрутизации")
