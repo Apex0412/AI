@@ -1,5 +1,8 @@
 const appState = window.__INITIAL_STATE__ || {};
+appState.map_provider = appState.map_provider === "osm" ? "osm" : "google";
 let map;
+let mapProvider = appState.map_provider;
+let mapLibrary = null;
 const layers = {
   polygon: null,
   roads: [],
@@ -32,6 +35,28 @@ const waitForGoogle = () =>
     }, 100);
   });
 
+const waitForLeaflet = () =>
+  new Promise((resolve) => {
+    if (window.L) {
+      resolve(window.L);
+      return;
+    }
+    const interval = setInterval(() => {
+      if (window.L) {
+        clearInterval(interval);
+        resolve(window.L);
+      }
+    }, 100);
+  });
+
+const isGoogleProvider = () => mapProvider === "google";
+
+const ensureMapLibrary = async () => {
+  if (mapLibrary) return mapLibrary;
+  mapLibrary = isGoogleProvider() ? await waitForGoogle() : await waitForLeaflet();
+  return mapLibrary;
+};
+
 const formatLatLng = ({ lat, lng }) => `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
 
 const qs = (selector) => document.querySelector(selector);
@@ -46,6 +71,10 @@ const setFieldValues = () => {
   qs("#base-lng").value = appState.base_location?.lng?.toFixed(4) ?? "";
   qs("#night-mode").checked = Boolean(appState.night_mode);
   qs("#simplify-routes").checked = false;
+  const providerSelect = qs("#map-provider");
+  if (providerSelect) {
+    providerSelect.value = appState.map_provider || "google";
+  }
   updateGoogleStatus();
 };
 
@@ -252,47 +281,128 @@ const applyNightMode = () => {
   document.body.classList.toggle("night", Boolean(appState.night_mode));
 };
 
-const clearLayer = (list) => {
-  list.forEach((item) => item.setMap && item.setMap(null));
+const removeOverlay = (overlay, provider = mapProvider) => {
+  if (!overlay) return;
+  if (provider === "google") {
+    overlay.setMap?.(null);
+  } else if (provider === "osm") {
+    if (map?.hasLayer?.(overlay)) {
+      map.removeLayer(overlay);
+    }
+    overlay.remove?.();
+  }
+};
+
+const clearLayer = (list, provider = mapProvider) => {
+  list.forEach((item) => removeOverlay(item, provider));
   list.length = 0;
 };
 
-const drawPolygon = (maps) => {
-  if (!appState.city_polygon?.geometry) return;
+const resetLayerState = (provider = mapProvider) => {
   if (layers.polygon) {
-    layers.polygon.setMap(null);
+    removeOverlay(layers.polygon, provider);
+    layers.polygon = null;
   }
-  const path = appState.city_polygon.geometry.coordinates[0].map(([lng, lat]) => ({ lat, lng }));
-  layers.polygon = new maps.Polygon({
-    paths: path,
-    strokeColor: "#38BDF8",
-    strokeOpacity: 0.7,
-    strokeWeight: 2,
-    fillColor: "#0EA5E9",
-    fillOpacity: 0.08,
-  });
-  layers.polygon.setMap(qsMap());
+  if (layers.base) {
+    removeOverlay(layers.base, provider);
+    layers.base = null;
+  }
+  clearLayer(layers.roads, provider);
+  clearLayer(layers.grid, provider);
+  clearLayer(layers.routes, provider);
+  clearLayer(layers.monitoring, provider);
+  clearLayer(layers.places, provider);
+  layers.routeMeta = [];
+  layers.roadMeta.clear();
+  layers.gridMeta.clear();
 };
 
-const drawBaseMarker = (maps) => {
-  if (!appState.base_location) return;
-  if (layers.base) layers.base.setMap(null);
-  layers.base = new maps.Marker({
-    position: appState.base_location,
-    icon: {
-      path: maps.SymbolPath.CIRCLE,
-      scale: 10,
+const setOverlayVisibility = (overlay, visible) => {
+  if (!overlay) return;
+  if (isGoogleProvider()) {
+    overlay.setMap?.(visible ? map : null);
+  } else if (map) {
+    const hasLayer = map.hasLayer?.(overlay);
+    if (visible && !hasLayer) {
+      overlay.addTo?.(map);
+    } else if (!visible && hasLayer) {
+      map.removeLayer?.(overlay);
+    }
+  }
+};
+
+const drawPolygon = (lib) => {
+  if (!appState.city_polygon?.geometry) {
+    if (layers.polygon) {
+      removeOverlay(layers.polygon);
+      layers.polygon = null;
+    }
+    return;
+  }
+  const coords = appState.city_polygon.geometry.coordinates[0].map(([lng, lat]) => ({ lat, lng }));
+  if (layers.polygon) {
+    removeOverlay(layers.polygon);
+  }
+  if (isGoogleProvider()) {
+    layers.polygon = new lib.Polygon({
+      paths: coords,
+      strokeColor: "#38BDF8",
+      strokeOpacity: 0.7,
+      strokeWeight: 2,
+      fillColor: "#0EA5E9",
+      fillOpacity: 0.08,
+    });
+    layers.polygon.setMap(map);
+  } else {
+    const latLngs = coords.map(({ lat, lng }) => [lat, lng]);
+    layers.polygon = lib.polygon(latLngs, {
+      color: "#38BDF8",
+      weight: 2,
+      opacity: 0.7,
+      fillColor: "#0EA5E9",
+      fillOpacity: 0.08,
+    });
+    layers.polygon.addTo(map);
+  }
+};
+
+const drawBaseMarker = (lib) => {
+  if (!appState.base_location) {
+    if (layers.base) {
+      removeOverlay(layers.base);
+      layers.base = null;
+    }
+    return;
+  }
+  if (layers.base) removeOverlay(layers.base);
+  if (isGoogleProvider()) {
+    layers.base = new lib.Marker({
+      position: appState.base_location,
+      icon: {
+        path: lib.SymbolPath.CIRCLE,
+        scale: 10,
+        fillColor: "#FACC15",
+        fillOpacity: 1,
+        strokeColor: "#FDE68A",
+        strokeWeight: 2,
+      },
+      title: "База",
+    });
+    layers.base.setMap(map);
+  } else {
+    layers.base = lib.circleMarker([appState.base_location.lat, appState.base_location.lng], {
+      radius: 8,
+      weight: 2,
+      color: "#FDE68A",
       fillColor: "#FACC15",
       fillOpacity: 1,
-      strokeColor: "#FDE68A",
-      strokeWeight: 2,
-    },
-    title: "База",
-  });
-  layers.base.setMap(qsMap());
+      pane: "markerPane",
+    });
+    layers.base.addTo(map);
+  }
 };
 
-const drawRoads = (maps) => {
+const drawRoads = (lib) => {
   clearLayer(layers.roads);
   layers.roadMeta.clear();
   const roadAssignments = new Map();
@@ -300,60 +410,100 @@ const drawRoads = (maps) => {
     segmentIds.forEach((id) => roadAssignments.set(id, tractorId));
   });
   (appState.road_segments || []).forEach((segment) => {
-    const coords = segment.geometry.coordinates.map(([lng, lat]) => ({ lat, lng }));
     const assignedTractor = roadAssignments.get(segment.id);
     const color = assignedTractor ? getTractorColor(assignedTractor) : "#94A3B8";
-    const polyline = new maps.Polyline({
-      path: coords,
-      strokeColor: color,
-      strokeOpacity: assignedTractor ? 0.85 : 0.5,
-      strokeWeight: assignedTractor ? 3 : 2,
-    });
-    polyline.setMap(qsMap());
-    layers.roads.push(polyline);
-    layers.roadMeta.set(polyline, segment);
-    maps.event.addListener(polyline, "click", (event) => handleMapClick("road", segment, event.latLng));
+    if (isGoogleProvider()) {
+      const coords = segment.geometry.coordinates.map(([lng, lat]) => ({ lat, lng }));
+      const polyline = new lib.Polyline({
+        path: coords,
+        strokeColor: color,
+        strokeOpacity: assignedTractor ? 0.85 : 0.5,
+        strokeWeight: assignedTractor ? 3 : 2,
+      });
+      polyline.setMap(map);
+      layers.roads.push(polyline);
+      layers.roadMeta.set(polyline, segment);
+      lib.event.addListener(polyline, "click", (event) => handleMapClick("road", segment, event.latLng));
+    } else {
+      const coords = segment.geometry.coordinates.map(([lng, lat]) => [lat, lng]);
+      const polyline = lib.polyline(coords, {
+        color,
+        weight: assignedTractor ? 4 : 2,
+        opacity: assignedTractor ? 0.85 : 0.5,
+      });
+      polyline.addTo(map);
+      polyline.on("click", (event) => handleMapClick("road", segment, event.latlng));
+      layers.roads.push(polyline);
+      layers.roadMeta.set(polyline, segment);
+    }
   });
 };
 
-const drawGrid = (maps) => {
+const drawGrid = (lib) => {
   clearLayer(layers.grid);
   layers.gridMeta.clear();
   (appState.grid || []).forEach((cell) => {
-    const coords = cell.geometry.coordinates[0].map(([lng, lat]) => ({ lat, lng }));
     const assignment = appState.grid_assignments?.[cell.id];
     const color = assignment ? getTractorColor(assignment) : "#22C55E";
-    const polygon = new maps.Polygon({
-      paths: coords,
-      strokeColor: color,
-      strokeOpacity: 0.4,
-      strokeWeight: 1,
-      fillColor: color,
-      fillOpacity: assignment ? 0.18 : 0.05,
-    });
-    polygon.setMap(qsMap());
-    layers.grid.push(polygon);
-    layers.gridMeta.set(polygon, cell);
-    maps.event.addListener(polygon, "click", (event) => handleMapClick("grid", cell, event.latLng));
+    if (isGoogleProvider()) {
+      const coords = cell.geometry.coordinates[0].map(([lng, lat]) => ({ lat, lng }));
+      const polygon = new lib.Polygon({
+        paths: coords,
+        strokeColor: color,
+        strokeOpacity: 0.4,
+        strokeWeight: 1,
+        fillColor: color,
+        fillOpacity: assignment ? 0.18 : 0.05,
+      });
+      polygon.setMap(map);
+      layers.grid.push(polygon);
+      layers.gridMeta.set(polygon, cell);
+      lib.event.addListener(polygon, "click", (event) => handleMapClick("grid", cell, event.latLng));
+    } else {
+      const coords = cell.geometry.coordinates[0].map(([lng, lat]) => [lat, lng]);
+      const polygon = lib.polygon(coords, {
+        color,
+        weight: 1,
+        opacity: 0.4,
+        fillColor: color,
+        fillOpacity: assignment ? 0.18 : 0.05,
+      });
+      polygon.addTo(map);
+      polygon.on("click", (event) => handleMapClick("grid", cell, event.latlng));
+      layers.grid.push(polygon);
+      layers.gridMeta.set(polygon, cell);
+    }
   });
 };
 
-const drawRoutes = (maps) => {
+const drawRoutes = (lib) => {
   clearLayer(layers.routes);
   layers.routeMeta = [];
   (appState.routes || []).forEach((route) => {
     const color = route.tractor?.color || "#0EA5E9";
     route.segments?.forEach((segment) => {
-      const coords = segment.geometry.coordinates.map(([lng, lat]) => ({ lat, lng }));
-      const polyline = new maps.Polyline({
-        path: coords,
-        strokeColor: color,
-        strokeOpacity: 0.9,
-        strokeWeight: 4,
-      });
-      polyline.setMap(qsMap());
-      layers.routes.push(polyline);
-      layers.routeMeta.push({ polyline, route, segment });
+      if (isGoogleProvider()) {
+        const coords = segment.geometry.coordinates.map(([lng, lat]) => ({ lat, lng }));
+        const polyline = new lib.Polyline({
+          path: coords,
+          strokeColor: color,
+          strokeOpacity: 0.9,
+          strokeWeight: 4,
+        });
+        polyline.setMap(map);
+        layers.routes.push(polyline);
+        layers.routeMeta.push({ polyline, route, segment });
+      } else {
+        const coords = segment.geometry.coordinates.map(([lng, lat]) => [lat, lng]);
+        const polyline = lib.polyline(coords, {
+          color,
+          weight: 4,
+          opacity: 0.9,
+        });
+        polyline.addTo(map);
+        layers.routes.push(polyline);
+        layers.routeMeta.push({ polyline, route, segment });
+      }
     });
   });
 };
@@ -431,6 +581,124 @@ const submitAssignment = async () => {
   closeDialog();
 };
 
+const destroyMapInstance = (provider = mapProvider) => {
+  resetLayerState(provider);
+  if (!map) {
+    mapLibrary = null;
+    return;
+  }
+  if (provider === "osm" && typeof map.remove === "function") {
+    map.remove();
+  }
+  if (provider === "google") {
+    const mapEl = document.getElementById("map");
+    if (mapEl) {
+      while (mapEl.firstChild) {
+        mapEl.removeChild(mapEl.firstChild);
+      }
+    }
+  }
+  map = null;
+  mapLibrary = null;
+};
+
+const fitBoundsToData = (lib) => {
+  if (!map) return;
+  const polygonCoords = appState.city_polygon?.geometry?.coordinates?.[0] || [];
+  if (polygonCoords.length) {
+    if (isGoogleProvider()) {
+      const bounds = new lib.LatLngBounds();
+      polygonCoords.forEach(([lng, lat]) => bounds.extend({ lat, lng }));
+      map.fitBounds(bounds);
+    } else {
+      const latLngs = polygonCoords.map(([lng, lat]) => [lat, lng]);
+      if (latLngs.length === 1) {
+        map.setView(latLngs[0], map.getZoom() || 13);
+      } else {
+        map.fitBounds(lib.latLngBounds(latLngs));
+      }
+    }
+    return;
+  }
+  if (appState.base_location) {
+    if (isGoogleProvider()) {
+      map.setCenter(appState.base_location);
+      map.setZoom(13);
+    } else {
+      map.setView([appState.base_location.lat, appState.base_location.lng], map.getZoom() || 13);
+    }
+  }
+};
+
+const redrawMap = async () => {
+  if (!map) return;
+  const lib = await ensureMapLibrary();
+  drawPolygon(lib);
+  drawRoads(lib);
+  drawGrid(lib);
+  drawRoutes(lib);
+  drawBaseMarker(lib);
+  fitBoundsToData(lib);
+  if (!isGoogleProvider()) {
+    map.invalidateSize?.();
+  }
+};
+
+const initMap = async () => {
+  const mapElement = document.getElementById("map");
+  if (!mapElement) return;
+  const center = appState.base_location || { lat: 54.9099, lng: 37.3634 };
+  const lib = await ensureMapLibrary();
+  if (isGoogleProvider()) {
+    map = new lib.Map(mapElement, {
+      center,
+      zoom: 13,
+      mapId: "municipal-routing",
+      disableDefaultUI: true,
+      zoomControl: true,
+      styles: appState.night_mode
+        ? [
+            { elementType: "geometry", stylers: [{ color: "#0f172a" }] },
+            { elementType: "labels.text.fill", stylers: [{ color: "#e2e8f0" }] },
+            { featureType: "water", stylers: [{ color: "#0f172a" }] },
+            { featureType: "road", stylers: [{ color: "#1e293b" }] },
+          ]
+        : undefined,
+    });
+  } else {
+    if (map && typeof map.remove === "function") {
+      map.remove();
+    }
+    map = lib.map(mapElement, {
+      center: [center.lat, center.lng],
+      zoom: 13,
+      zoomControl: true,
+      attributionControl: true,
+    });
+    lib
+      .tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        attribution: "© OpenStreetMap contributors",
+        maxZoom: 19,
+      })
+      .addTo(map);
+  }
+  await redrawMap();
+};
+
+const ensureMapProvider = async () => {
+  const desired = appState.map_provider === "osm" ? "osm" : "google";
+  appState.map_provider = desired;
+  if (mapProvider !== desired) {
+    destroyMapInstance(mapProvider);
+    mapProvider = desired;
+  }
+  if (!map) {
+    await initMap();
+  } else {
+    await redrawMap();
+  }
+};
+
 const refreshState = async () => {
   const response = await fetch("/api/state");
   const data = await response.json();
@@ -442,64 +710,9 @@ const refreshState = async () => {
   renderProgress();
   applyNightMode();
   setFieldValues();
+  await ensureMapProvider();
   updateMonitoringToggle();
-  await redrawMap();
   applyFilter();
-};
-
-const redrawMap = async () => {
-  const maps = await waitForGoogle();
-  drawPolygon(maps);
-  drawRoads(maps);
-  drawGrid(maps);
-  drawRoutes(maps);
-  drawBaseMarker(maps);
-  fitBoundsToData(maps);
-};
-
-const qsMap = () => map;
-
-const initMap = async () => {
-  const maps = await waitForGoogle();
-  map = new maps.Map(document.getElementById("map"), {
-    center: appState.base_location || { lat: 55.751244, lng: 37.618423 },
-    zoom: 13,
-    mapId: "municipal-routing",
-    disableDefaultUI: true,
-    zoomControl: true,
-    styles: appState.night_mode
-      ? [
-          { elementType: "geometry", stylers: [{ color: "#0f172a" }] },
-          { elementType: "labels.text.fill", stylers: [{ color: "#e2e8f0" }] },
-          { featureType: "water", stylers: [{ color: "#0f172a" }] },
-          { featureType: "road", stylers: [{ color: "#1e293b" }] },
-        ]
-      : undefined,
-  });
-  drawPolygon(maps);
-  drawRoads(maps);
-  drawGrid(maps);
-  drawRoutes(maps);
-  drawBaseMarker(maps);
-  fitBoundsToData(maps);
-};
-
-const fitBoundsToData = (maps) => {
-  if (!map) return;
-  const bounds = new maps.LatLngBounds();
-  let hasData = false;
-  if (layers.polygon) {
-    layers.polygon.getPath().forEach((latLng) => {
-      bounds.extend(latLng);
-    });
-    hasData = true;
-  }
-  if (!hasData && appState.base_location) {
-    bounds.extend(appState.base_location);
-  }
-  if (hasData) {
-    map.fitBounds(bounds);
-  }
 };
 
 const handleBuildGrid = async () => {
@@ -549,6 +762,7 @@ const handleConfigSave = async () => {
       lng: Number(qs("#base-lng").value) || currentBase.lng,
     },
     night_mode: qs("#night-mode").checked,
+    map_provider: qs("#map-provider")?.value || appState.map_provider || "google",
   };
   const response = await fetch("/api/config", {
     method: "POST",
@@ -562,7 +776,7 @@ const handleConfigSave = async () => {
   updateLegend();
   applyNightMode();
   setFieldValues();
-  await redrawMap();
+  await ensureMapProvider();
 };
 
 const handleKeyCheck = async () => {
@@ -634,19 +848,19 @@ const handleRouting = async () => {
 const toggleLayer = (layerName, visible) => {
   switch (layerName) {
     case "polygon":
-      layers.polygon?.setMap(visible ? qsMap() : null);
+      setOverlayVisibility(layers.polygon, visible);
       break;
     case "grid":
-      layers.grid.forEach((poly) => poly.setMap(visible ? qsMap() : null));
+      layers.grid.forEach((poly) => setOverlayVisibility(poly, visible));
       break;
     case "roads":
-      layers.roads.forEach((poly) => poly.setMap(visible ? qsMap() : null));
+      layers.roads.forEach((poly) => setOverlayVisibility(poly, visible));
       break;
     case "routes":
-      layers.routes.forEach((poly) => poly.setMap(visible ? qsMap() : null));
+      layers.routes.forEach((poly) => setOverlayVisibility(poly, visible));
       break;
     case "base":
-      layers.base?.setMap(visible ? qsMap() : null);
+      setOverlayVisibility(layers.base, visible);
       break;
   }
 };
@@ -726,7 +940,8 @@ const updateMonitoringPanel = (tractors) => {
     return;
   }
 
-  const maps = map && google?.maps;
+  const maps = map && isGoogleProvider() ? mapLibrary : null;
+  const leafletLib = map && !isGoogleProvider() ? mapLibrary : null;
   container.innerHTML = tractors
     .map(
       (tractor) => `
@@ -780,6 +995,18 @@ const updateMonitoringPanel = (tractors) => {
       });
       layers.monitoring.push(marker);
     });
+  } else if (leafletLib) {
+    tractors.forEach((tractor) => {
+      const marker = leafletLib.circleMarker([tractor.lat, tractor.lng], {
+        radius: 6,
+        weight: 2,
+        color: tractor.color,
+        fillColor: tractor.color,
+        fillOpacity: 0.9,
+      });
+      marker.addTo(map);
+      layers.monitoring.push(marker);
+    });
   }
 };
 
@@ -799,7 +1026,7 @@ const handleSessionLoad = () => {
     });
     const data = await response.json();
     Object.assign(appState, data.state);
-    await redrawMap();
+    await ensureMapProvider();
     renderLogs();
     renderProgress();
     updateLegend();
@@ -877,12 +1104,12 @@ function applyFilter() {
   const enabled = qs("#filter-tractor").checked;
   const selected = qs("#filter-tractor-select").value;
   if (!enabled || selected === "all") {
-    layers.routes.forEach((poly) => poly.setMap(qsMap()));
+    layers.routes.forEach((poly) => setOverlayVisibility(poly, true));
     return;
   }
   layers.routeMeta.forEach(({ polyline, route }) => {
     const visible = route.tractor?.id === selected;
-    polyline.setMap(visible ? qsMap() : null);
+    setOverlayVisibility(polyline, visible);
   });
 }
 
@@ -940,7 +1167,7 @@ const init = async () => {
   renderLogs();
   renderProgress();
   applyNightMode();
-  initMap();
+  await ensureMapProvider();
   initTabs();
   initHelpDrawer();
   initAssignmentDialog();
@@ -960,7 +1187,9 @@ const init = async () => {
   qs("#toggle-monitoring").addEventListener("click", handleMonitoringToggle);
   qs("#save-session").addEventListener("click", handleSessionSave);
 
-  qsa("#tractors-count, #route-limit, #travel-mode, #max-waypoints, #base-lat, #base-lng, #night-mode").forEach((el) => {
+  qsa(
+    "#tractors-count, #route-limit, #travel-mode, #max-waypoints, #base-lat, #base-lng, #night-mode, #map-provider",
+  ).forEach((el) => {
     el.addEventListener("change", () => {
       handleConfigSave();
     });

@@ -45,6 +45,7 @@ class AppState:
     google_api_key: str = ""
     monitoring_enabled: bool = False
     night_mode: bool = False
+    map_provider: str = "google"
 
     def ensure_tractors(self, count: int) -> None:
         if count < 1:
@@ -110,6 +111,7 @@ class AppState:
             "google_api_key": bool(self.google_api_key),
             "monitoring_enabled": self.monitoring_enabled,
             "night_mode": self.night_mode,
+            "map_provider": self.map_provider,
         }
 
 
@@ -147,6 +149,7 @@ def load_state(path: Path) -> AppState:
     state.google_api_key = session_data.get("google_api_key", "")
     state.monitoring_enabled = session_data.get("monitoring_enabled", False)
     state.night_mode = session_data.get("night_mode", False)
+    state.map_provider = session_data.get("map_provider", "google")
     return state
 
 
@@ -167,5 +170,6 @@ def save_state(state: AppState, path: Path) -> None:
         "google_api_key": state.google_api_key,
         "monitoring_enabled": state.monitoring_enabled,
         "night_mode": state.night_mode,
+        "map_provider": state.map_provider,
     }
     path.write_text(json.dumps(payload, indent=2, ensure_ascii=False))

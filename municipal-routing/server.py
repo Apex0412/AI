@@ -129,6 +129,10 @@ def update_config():
         state.max_waypoints = int(payload["max_waypoints"])
     if "night_mode" in payload:
         state.night_mode = bool(payload["night_mode"])
+    if "map_provider" in payload:
+        provider = str(payload["map_provider"]).lower()
+        if provider in {"google", "osm"}:
+            state.map_provider = provider
     save_state(state, DATA_DIR / "session.json")
     _append_log("Обновлены параметры маршрутизации")
     return jsonify({"status": "ok", "state": state.to_dict()})

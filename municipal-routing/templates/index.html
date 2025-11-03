@@ -5,6 +5,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Municipal Routing Control Center</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha512-sA+4sP04bJ5x3sZBdc+5+yfJOLLmObAun1vDLteA94ppIqhzyapMI2Qxb38nSxr2idKdvUSsfx8b9kMLxw2vYg=="
+      crossorigin=""
+    />
     <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}" />
   </head>
   <body class="h-full bg-slate-900 text-slate-100">
@@ -90,6 +96,13 @@
                   <span>Статус ключа</span>
                   <span id="google-status" class="font-semibold text-amber-300">Не проверен</span>
                 </div>
+                <label class="field">
+                  <span>Провайдер карты</span>
+                  <select id="map-provider">
+                    <option value="google">Google Maps</option>
+                    <option value="osm">OpenStreetMap</option>
+                  </select>
+                </label>
                 <label class="flex items-center gap-3 text-xs text-slate-300">
                   <input id="night-mode" type="checkbox" class="accent-emerald-400" />
                   Ночной режим интерфейса
@@ -319,6 +332,11 @@
     <script>
       window.__INITIAL_STATE__ = {{ state | tojson }};
     </script>
+    <script
+      src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+      integrity="sha512-vw2G8GZ8d7fM/3MhUlCT3VkOITkkpFmS6r30YIOCwVDDDeWGPAHDq6cHruM3aMcMBXNte1qfN92U0C0fLk6FZw=="
+      crossorigin=""
+    ></script>
     <script src="{{ url_for('static', filename='app.js') }}" type="module"></script>
     {% if google_maps_key %}
     <script src="https://maps.googleapis.com/maps/api/js?key={{ google_maps_key }}&libraries=places" async defer></script>
