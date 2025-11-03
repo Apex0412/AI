@@ -477,14 +477,14 @@ const drawPolygon = (lib) => {
       strokeOpacity: 0.7,
       strokeWeight: 2,
       fillColor: "#0EA5E9",
-      fillOpacity: 0.08,
+      fillOpacity: 0,
     });
     layers.polygon.setMap(map);
   } else if (isYandexProvider()) {
     const latLngs = coords.map(({ lat, lng }) => [lat, lng]);
     layers.polygon = new lib.Polygon([latLngs], {
       fillColor: "#0EA5E9",
-      fillOpacity: 0.08,
+      fillOpacity: 0,
       strokeColor: "#38BDF8",
       strokeOpacity: 0.7,
       strokeWidth: 2,
@@ -497,7 +497,7 @@ const drawPolygon = (lib) => {
       weight: 2,
       opacity: 0.7,
       fillColor: "#0EA5E9",
-      fillOpacity: 0.08,
+      fillOpacity: 0,
     });
     layers.polygon.addTo(map);
   }
