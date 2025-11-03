@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="ru" class="h-full">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Municipal Routing Control Center</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    {% if yandex_maps_key %}
+    <script src="https://api-maps.yandex.ru/2.1/?apikey={{ yandex_maps_key }}&lang=ru_RU"></script>
+    {% else %}
+    <script src="https://api-maps.yandex.ru/2.1/?lang=ru_RU"></script>
+    {% endif %}
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha512-sA+4sP04bJ5x3sZBdc+5+yfJOLLmObAun1vDLteA94ppIqhzyapMI2Qxb38nSxr2idKdvUSsfx8b9kMLxw2vYg=="
+      crossorigin=""
+    />
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}" />
+  </head>
+  <body class="h-full bg-slate-900 text-slate-100">
+    <div class="relative h-full w-full" id="app-root">
+      <div id="map" class="absolute inset-0"></div>
+
+      <div class="pointer-events-none absolute inset-0 flex flex-col lg:flex-row justify-between p-6 gap-4">
+        <aside
+          class="pointer-events-auto w-full max-w-[420px] overflow-hidden rounded-3xl border border-slate-800/80 bg-slate-900/80 shadow-[0_25px_80px_-40px_rgba(15,23,42,0.75)] backdrop-blur"
+        >
+          <div class="max-h-[calc(100vh-3rem)] overflow-y-auto px-6 py-6 space-y-8">
+            <header class="space-y-2">
+              <h1 class="text-2xl font-semibold tracking-tight text-slate-50">Маршрутизация тракторов</h1>
+              <p class="text-sm text-slate-400 leading-relaxed">
+                Управляйте параметрами маршрутизации, назначайте зоны и запускайте построение маршрутов через сервисы
+                Яндекс.Карт, OSRM и OpenRouteService. Google Maps можно включить отдельно при необходимости.
+              </p>
+              <div class="grid grid-cols-2 gap-4 text-xs uppercase tracking-widest text-slate-400">
+                <div class="rounded-2xl bg-slate-800/60 p-4">
+                  <p class="text-slate-500">База</p>
+                  <p class="mt-1 text-sm font-semibold text-emerald-300" id="base-location">—</p>
+                </div>
+                <div class="rounded-2xl bg-slate-800/60 p-4">
+                  <p class="text-slate-500">Последний запуск</p>
+                  <p class="mt-1 text-sm font-semibold text-sky-300" id="last-run">—</p>
+                </div>
+              </div>
+            </header>
+
+            <section class="space-y-4">
+              <div class="flex items-center justify-between">
+                <h2 class="text-sm font-semibold uppercase tracking-[0.3em] text-slate-400">
+                  Основные параметры
+                </h2>
+                <button
+                  id="toggle-advanced"
+                  class="text-xs font-semibold text-emerald-300 transition hover:text-emerald-200"
+                >
+                  Дополнительно
+                </button>
+              </div>
+              <div class="grid grid-cols-2 gap-3 text-sm">
+                <label class="field">
+                  <span>Количество тракторов</span>
+                  <input id="tractors-count" type="number" min="1" value="4" />
+                </label>
+                <label class="field">
+                  <span>Лимит маршрута (км)</span>
+                  <input id="route-limit" type="number" min="1" step="1" value="30" />
+                </label>
+                <label class="field col-span-2">
+                  <span>Режим движения</span>
+                  <select id="travel-mode">
+                    <option value="driving">🚗 driving</option>
+                    <option value="walking">🚶 walking</option>
+                    <option value="bicycling">🚴 bicycling</option>
+                  </select>
+                </label>
+                <label class="field">
+                  <span>Максимум Waypoints</span>
+                  <input id="max-waypoints" type="number" min="1" max="25" value="23" />
+                </label>
+                <label class="field">
+                  <span>База — широта</span>
+                  <input id="base-lat" type="number" step="0.0001" />
+                </label>
+                <label class="field">
+                  <span>База — долгота</span>
+                  <input id="base-lng" type="number" step="0.0001" />
+                </label>
+              </div>
+              <div id="advanced-block" class="hidden space-y-3 text-sm">
+                <label class="field hidden" data-google-only>
+                  <span>Google API Key</span>
+                  <div class="flex gap-2">
+                    <input id="google-key" type="text" placeholder="AIza..." class="flex-1" />
+                    <button id="check-key" class="rounded-xl bg-emerald-500 px-3 text-xs font-semibold text-slate-950">
+                      Проверить
+                    </button>
+                  </div>
+                </label>
+                <label class="field">
+                  <span>Yandex API Key</span>
+                  <input id="yandex-key" type="text" placeholder="YANDEX_MAP_KEY" />
+                </label>
+                <label class="field">
+                  <span>OpenRouteService API Key</span>
+                  <input id="ors-key" type="text" placeholder="ORS-..." />
+                </label>
+                <label class="field">
+                  <span>GraphHopper API Key</span>
+                  <input id="graphhopper-key" type="text" placeholder="gh-..." />
+                </label>
+                <label class="field">
+                  <span>GraphHopper Base URL</span>
+                  <input id="graphhopper-base-url" type="text" placeholder="https://graphhopper.com/api/1" />
+                </label>
+                <label class="field">
+                  <span>OSRM Base URL</span>
+                  <input id="osrm-base-url" type="text" placeholder="https://router.project-osrm.org" />
+                </label>
+                <label class="field">
+                  <span>OpenRouteService Base URL</span>
+                  <input id="ors-base-url" type="text" placeholder="https://api.openrouteservice.org" />
+                </label>
+                <div class="flex items-center justify-between text-xs text-slate-400 hidden" data-google-only>
+                  <span>Статус ключа</span>
+                  <span id="google-status" class="font-semibold text-amber-300">Не проверен</span>
+                </div>
+                <label class="flex items-center gap-3 text-xs text-slate-300 hidden" data-google-only>
+                  <input id="enable-google" type="checkbox" class="accent-emerald-400" />
+                  Разрешить использование Google API (после разблокировки)
+                </label>
+                <label class="field">
+                  <span>Провайдер карты</span>
+                  <select id="map-provider">
+                    <option value="yandex">Yandex Maps</option>
+                    <option value="google" data-google-only>Google Maps</option>
+                    <option value="osm">OpenStreetMap</option>
+                  </select>
+                </label>
+                <label class="flex items-center gap-3 text-xs text-slate-300">
+                  <input id="night-mode" type="checkbox" class="accent-emerald-400" />
+                  Ночной режим интерфейса
+                </label>
+                <label class="flex items-center gap-3 text-xs text-slate-300">
+                  <input id="simplify-routes" type="checkbox" class="accent-emerald-400" />
+                  Упростить маршрут до ≤1000 точек
+                </label>
+              </div>
+            </section>
+
+            <section class="space-y-4">
+              <h2 class="text-sm font-semibold uppercase tracking-[0.3em] text-slate-400">Рабочая зона</h2>
+              <div class="grid grid-cols-2 gap-2 text-sm">
+                <button data-upload="geo" class="ghost-btn">Загрузить GEO.kml</button>
+                <button data-upload="roads" class="ghost-btn">Загрузить RoadCity.kml</button>
+                <label class="field col-span-2">
+                  <span>Количество клеток (NxN)</span>
+                  <input id="grid-divisions" type="number" min="2" max="40" value="8" />
+                </label>
+                <button id="build-grid" class="primary-btn col-span-2">Сформировать сетку</button>
+                <label class="flex items-center gap-2 text-xs text-slate-300 col-span-2">
+                  <input id="toggle-grid-visibility" type="checkbox" class="accent-emerald-400" checked />
+                  Показать / скрыть сетку
+                </label>
+              </div>
+              <div class="grid grid-cols-3 gap-2 text-xs text-slate-300">
+                <label class="checkbox-pill">
+                  <input type="checkbox" id="mode-grid" checked />
+                  <span>Использовать сетку</span>
+                </label>
+                <label class="checkbox-pill">
+                  <input type="checkbox" id="mode-roads" checked />
+                  <span>Использовать дороги</span>
+                </label>
+                <label class="checkbox-pill">
+                  <input type="checkbox" id="mode-combined" checked />
+                  <span>Комбинированный</span>
+                </label>
+              </div>
+              <button id="auto-assign" class="secondary-btn">Автораспределение</button>
+            </section>
+
+            <section class="space-y-4">
+              <h2 class="text-sm font-semibold uppercase tracking-[0.3em] text-slate-400">Ручное назначение</h2>
+              <div class="flex items-center gap-3 text-xs">
+                <label class="radio-pill">
+                  <input type="radio" name="assign-mode" value="grid" checked />
+                  <span>Назначить клетку</span>
+                </label>
+                <label class="radio-pill">
+                  <input type="radio" name="assign-mode" value="road" />
+                  <span>Назначить линию</span>
+                </label>
+              </div>
+              <p class="text-xs text-slate-400">
+                Кликните по элементу на карте, выберите трактор и подтвердите назначение. Состояние сохраняется в
+                session.json.
+              </p>
+              <button id="reset-assignments" class="ghost-btn text-red-300 hover:text-red-200">Сбросить распределение</button>
+            </section>
+
+            <section class="space-y-4">
+              <h2 class="text-sm font-semibold uppercase tracking-[0.3em] text-slate-400">Построение маршрутов</h2>
+              <button id="run-routing" class="primary-btn">Построить маршруты</button>
+              <div class="rounded-2xl border border-slate-800 bg-slate-900/70 p-4 space-y-3 text-xs">
+                <div class="flex items-center justify-between text-slate-400">
+                  <span id="routing-status">Ожидание запуска</span>
+                  <span id="routing-eta" class="font-semibold text-slate-200">—</span>
+                </div>
+                <div class="space-y-2" id="progress-container"></div>
+              </div>
+              <div class="space-y-2 text-xs text-slate-400">
+                <label class="flex items-center gap-2">
+                  <input type="checkbox" id="layer-polygon" class="accent-emerald-400" checked />
+                  GEO-зона
+                </label>
+                <label class="flex items-center gap-2">
+                  <input type="checkbox" id="layer-grid" class="accent-emerald-400" checked />
+                  Сетка
+                </label>
+                <label class="flex items-center gap-2">
+                  <input type="checkbox" id="layer-roads" class="accent-emerald-400" checked />
+                  Дороги
+                </label>
+                <label class="flex items-center gap-2">
+                  <input type="checkbox" id="layer-routes" class="accent-emerald-400" checked />
+                  Маршруты
+                </label>
+                <label class="flex items-center gap-2 hidden" data-google-only>
+                  <input type="checkbox" id="layer-places" class="accent-emerald-400" />
+                  Места (Places API)
+                </label>
+                <label class="flex items-center gap-2 hidden" data-google-only>
+                  <input type="checkbox" id="layer-elevation" class="accent-emerald-400" />
+                  Высоты (Elevation)
+                </label>
+                <label class="flex items-center gap-2">
+                  <input type="checkbox" id="layer-base" class="accent-emerald-400" checked />
+                  Базы
+                </label>
+              </div>
+              <div class="flex items-center justify-between text-xs text-slate-400">
+                <label class="flex items-center gap-2">
+                  <input type="checkbox" id="filter-tractor" class="accent-emerald-400" />
+                  Только трактор
+                </label>
+                <select id="filter-tractor-select" class="rounded-xl border border-slate-700 bg-slate-900/40 px-2 py-1 text-xs">
+                  <option value="all">Все</option>
+                </select>
+              </div>
+            </section>
+
+            <section class="space-y-4">
+              <h2 class="text-sm font-semibold uppercase tracking-[0.3em] text-slate-400">Визуализация</h2>
+              <div id="legend" class="space-y-2 text-sm"></div>
+            </section>
+
+            <section class="space-y-4">
+              <h2 class="text-sm font-semibold uppercase tracking-[0.3em] text-slate-400">Мониторинг</h2>
+              <button id="toggle-monitoring" class="secondary-btn">Включить онлайн-мониторинг</button>
+              <div class="rounded-2xl border border-slate-800 bg-slate-900/70 p-4 text-xs" id="monitoring-panel">
+                <p class="text-slate-400">Мониторинг выключен.</p>
+              </div>
+            </section>
+
+            <section class="space-y-4">
+              <h2 class="text-sm font-semibold uppercase tracking-[0.3em] text-slate-400">Экспорт и отчёты</h2>
+              <div class="grid grid-cols-2 gap-2 text-sm">
+                <button data-export="kml" class="secondary-btn">Экспорт KML</button>
+                <button data-export="geojson" class="secondary-btn">Экспорт GeoJSON</button>
+                <button id="export-pdf" class="ghost-btn">PDF-отчёт</button>
+                <button id="export-elevation" class="ghost-btn">Отчёт по высотам</button>
+              </div>
+              <div class="grid grid-cols-2 gap-2 text-sm">
+                <button id="save-session" class="secondary-btn">Сохранить сессию</button>
+                <label class="relative inline-flex cursor-pointer items-center justify-center rounded-2xl border border-slate-700 bg-slate-800/60 px-4 py-2 text-xs font-semibold text-slate-200 hover:border-emerald-400/60">
+                  <input type="file" id="load-session" class="absolute inset-0 opacity-0" />
+                  Загрузить сессию
+                </label>
+              </div>
+              <button id="help-button" class="ghost-btn">Справка</button>
+            </section>
+          </div>
+        </aside>
+
+        <aside
+          class="pointer-events-auto w-full max-w-[420px] overflow-hidden rounded-3xl border border-slate-800/80 bg-slate-950/80 shadow-[0_25px_80px_-40px_rgba(15,23,42,0.75)] backdrop-blur"
+        >
+          <div class="space-y-4 border-b border-slate-800 px-6 py-4">
+            <div class="flex items-start justify-between gap-4">
+              <div>
+                <h2 class="text-lg font-semibold text-slate-100">Диспетчер</h2>
+                <p class="text-xs text-slate-400">Логи, прогресс и история GPS</p>
+              </div>
+              <div class="flex items-center gap-3">
+                <span id="api-status-indicator" class="status-indicator status-pending">✓</span>
+                <div class="text-right">
+                  <p id="api-status-label" class="text-xs font-semibold text-amber-300">Проверка API</p>
+                  <p id="api-status-caption" class="text-[11px] text-slate-400">Статус загрузки сервисов</p>
+                </div>
+              </div>
+            </div>
+            <div class="flex items-center justify-between">
+              <div class="text-xs text-slate-400">Управление слоями и мониторинг</div>
+              <div class="flex gap-2 text-xs">
+                <button id="tab-logs" class="tab-btn active">Логи</button>
+                <button id="tab-monitoring" class="tab-btn">Мониторинг</button>
+              </div>
+            </div>
+          </div>
+          <div id="panel-logs" class="max-h-[calc(100vh-8rem)] overflow-y-auto px-6 py-6">
+            <div id="log-entries" class="space-y-3 text-sm"></div>
+          </div>
+          <div id="panel-monitoring" class="hidden max-h-[calc(100vh-8rem)] overflow-y-auto px-6 py-6 space-y-4">
+            <div class="text-xs text-slate-300" id="monitoring-list"></div>
+            <div class="rounded-2xl border border-slate-800 bg-slate-900/70 p-4 text-xs">
+              <h3 class="text-slate-200 font-semibold">История перемещений</h3>
+              <div id="tracking-history" class="mt-2 space-y-1 text-slate-400"></div>
+            </div>
+          </div>
+        </aside>
+      </div>
+
+      <div
+        id="assignment-dialog"
+        class="pointer-events-none fixed inset-0 z-30 hidden items-center justify-center bg-slate-900/80 backdrop-blur"
+      >
+        <div class="pointer-events-auto w-full max-w-sm rounded-3xl border border-slate-800 bg-slate-900 p-6 shadow-xl">
+          <h3 class="text-lg font-semibold text-slate-100">Назначить трактор</h3>
+          <p class="mt-2 text-sm text-slate-400">Выберите трактор для элемента <span id="dialog-element-name"></span>.</p>
+          <div id="dialog-tractor-options" class="mt-4 grid grid-cols-2 gap-2 text-sm"></div>
+          <div class="mt-6 flex justify-end gap-3 text-sm">
+            <button id="dialog-cancel" class="ghost-btn">Отмена</button>
+            <button id="dialog-confirm" class="primary-btn">OK</button>
+          </div>
+        </div>
+      </div>
+
+      <div
+        id="help-drawer"
+        class="pointer-events-none fixed inset-x-0 bottom-0 z-20 hidden max-h-[70vh] rounded-t-3xl border-t border-slate-800 bg-slate-900/95 p-8 text-sm text-slate-300 shadow-2xl backdrop-blur"
+      >
+        <div class="mx-auto max-w-4xl space-y-4">
+          <div class="flex items-center justify-between">
+            <h3 class="text-xl font-semibold text-slate-100">Справка</h3>
+            <button id="close-help" class="ghost-btn">Закрыть</button>
+          </div>
+          <p>
+            Используйте панель слева для настройки параметров карт и сервисов (Яндекс, OpenStreetMap, OSRM/ORS),
+            сетки, режимов распределения и построения маршрутов. В правой панели отображаются логи выполнения и
+            мониторинг в реальном времени. Экспортируйте результаты в KML, GeoJSON или PDF, а также сохраняйте и
+            загружайте сессии для продолжения работы.
+          </p>
+          <ul class="list-disc pl-4 text-slate-400">
+            <li>Клик по зоне или дорожному сегменту открывает окно назначения трактора.</li>
+            <li>Слои карты можно включать и выключать в блоке «Построение маршрутов».</li>
+            <li>Мониторинг обновляется каждые 30 секунд при включённом режиме.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      window.__INITIAL_STATE__ = {{ state | tojson }};
+      window.__ENABLE_GOOGLE__ = {{ enable_google_flag | tojson }};
+    </script>
+    <script
+      src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+      integrity="sha512-vw2G8GZ8d7fM/3MhUlCT3VkOITkkpFmS6r30YIOCwVDDDeWGPAHDq6cHruM3aMcMBXNte1qfN92U0C0fLk6FZw=="
+      crossorigin=""
+    ></script>
+    <script src="{{ url_for('static', filename='app.js') }}" type="module"></script>
+    {% if enable_google_flag %}
+      {% if google_maps_key %}
+    <script src="https://maps.googleapis.com/maps/api/js?key={{ google_maps_key }}&libraries=places" async defer></script>
+      {% else %}
+    <script src="https://maps.googleapis.com/maps/api/js?libraries=places" async defer></script>
+      {% endif %}
+    {% endif %}
+  </body>
+</html>

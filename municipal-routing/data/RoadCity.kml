@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://earth.google.com/kml/2.2">
+  <Document>
+    <Placemark>
+      <name>Segment A</name>
+      <LineString>
+        <coordinates>
+          37.6050,55.7520,0
+          37.6400,55.7520,0
+        </coordinates>
+      </LineString>
+    </Placemark>
+    <Placemark>
+      <name>Segment B</name>
+      <LineString>
+        <coordinates>
+          37.6050,55.7600,0
+          37.6400,55.7700,0
+        </coordinates>
+      </LineString>
+    </Placemark>
+    <Placemark>
+      <name>Segment C</name>
+      <LineString>
+        <coordinates>
+          37.6300,55.7550,0
+          37.6450,55.7750,0
+        </coordinates>
+      </LineString>
+    </Placemark>
+  </Document>
+</kml>
