@@ -97,6 +97,10 @@ def compute_routes():
         "enable_google_services": body.get("enable_google_services", state.enable_google_services),
         "yandex_api_key": body.get("yandex_api_key", state.yandex_api_key),
         "ors_api_key": body.get("ors_api_key", state.ors_api_key),
+        "graphhopper_api_key": body.get("graphhopper_api_key", state.graphhopper_api_key),
+        "osrm_base_url": body.get("osrm_base_url", state.osrm_base_url),
+        "ors_base_url": body.get("ors_base_url", state.ors_base_url),
+        "graphhopper_base_url": body.get("graphhopper_base_url", state.graphhopper_base_url),
     }
     google_keys = {
         "directions": state.google_api_key or os.getenv("GOOGLE_DIRECTIONS_API_KEY", os.getenv("GOOGLE_API_KEY", "")),
@@ -140,6 +144,20 @@ def update_config():
         state.yandex_api_key = payload["yandex_api_key"]
     if "ors_api_key" in payload:
         state.ors_api_key = payload["ors_api_key"]
+    if "graphhopper_api_key" in payload:
+        state.graphhopper_api_key = payload["graphhopper_api_key"]
+    if "osrm_base_url" in payload:
+        state.osrm_base_url = payload["osrm_base_url"] or os.getenv(
+            "OSRM_BASE_URL", "https://router.project-osrm.org"
+        )
+    if "ors_base_url" in payload:
+        state.ors_base_url = payload["ors_base_url"] or os.getenv(
+            "ORS_BASE_URL", "https://api.openrouteservice.org"
+        )
+    if "graphhopper_base_url" in payload:
+        state.graphhopper_base_url = payload["graphhopper_base_url"] or os.getenv(
+            "GRAPHHOPPER_BASE_URL", "https://graphhopper.com/api/1"
+        )
     if "map_provider" in payload:
         provider = str(payload["map_provider"]).lower()
         if provider in {"google", "osm", "yandex"}:
@@ -319,6 +337,27 @@ def load_session_endpoint():
     state.ensure_tractors(state.tractors_count)
     state.monitoring_enabled = content.get("monitoring_enabled", state.monitoring_enabled)
     state.night_mode = content.get("night_mode", state.night_mode)
+    google_key = content.get("google_api_key")
+    if isinstance(google_key, str):
+        state.google_api_key = google_key
+    yandex_key = content.get("yandex_api_key")
+    if isinstance(yandex_key, str):
+        state.yandex_api_key = yandex_key
+    ors_key = content.get("ors_api_key")
+    if isinstance(ors_key, str):
+        state.ors_api_key = ors_key
+    graphhopper_key = content.get("graphhopper_api_key")
+    if isinstance(graphhopper_key, str):
+        state.graphhopper_api_key = graphhopper_key
+    osrm_base = content.get("osrm_base_url")
+    if isinstance(osrm_base, str):
+        state.osrm_base_url = osrm_base
+    ors_base = content.get("ors_base_url")
+    if isinstance(ors_base, str):
+        state.ors_base_url = ors_base
+    graphhopper_base = content.get("graphhopper_base_url")
+    if isinstance(graphhopper_base, str):
+        state.graphhopper_base_url = graphhopper_base
     save_state(state, DATA_DIR / "session.json")
     _append_log("Сессия загружена из файла")
     return jsonify({"status": "ok", "state": state.to_dict()})

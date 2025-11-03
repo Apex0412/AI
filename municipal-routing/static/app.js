@@ -5,6 +5,9 @@ if (ENABLE_GOOGLE_SERVICES) availableProviders.push("google");
 appState.map_provider = availableProviders.includes(appState.map_provider)
   ? appState.map_provider
   : "yandex";
+const DEFAULT_OSRM_BASE_URL = "https://router.project-osrm.org";
+const DEFAULT_ORS_BASE_URL = "https://api.openrouteservice.org";
+const DEFAULT_GRAPHHOPPER_BASE_URL = "https://graphhopper.com/api/1";
 let map;
 let mapProvider = appState.map_provider;
 let mapLibrary = null;
@@ -87,6 +90,9 @@ const formatLatLng = ({ lat, lng }) => `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
 
 const qs = (selector) => document.querySelector(selector);
 const qsa = (selector) => Array.from(document.querySelectorAll(selector));
+const stripProtocol = (url) => (typeof url === "string" ? url.replace(/^https?:\/\//, "") : "");
+const isLocalUrl = (url) =>
+  typeof url === "string" && /^(https?:\/\/)?(localhost|127\.|0\.0\.0\.0)/i.test(url);
 
 const setFieldValues = () => {
   qs("#tractors-count").value = appState.tractors_count || appState.tractors?.length || 4;
@@ -113,6 +119,15 @@ const setFieldValues = () => {
   if (yandexInput) yandexInput.value = "";
   const orsInput = qs("#ors-key");
   if (orsInput) orsInput.value = "";
+  const graphhopperInput = qs("#graphhopper-key");
+  if (graphhopperInput) graphhopperInput.value = "";
+  const graphhopperBase = qs("#graphhopper-base-url");
+  if (graphhopperBase)
+    graphhopperBase.value = appState.graphhopper_base_url || DEFAULT_GRAPHHOPPER_BASE_URL;
+  const osrmBase = qs("#osrm-base-url");
+  if (osrmBase) osrmBase.value = appState.osrm_base_url || DEFAULT_OSRM_BASE_URL;
+  const orsBase = qs("#ors-base-url");
+  if (orsBase) orsBase.value = appState.ors_base_url || DEFAULT_ORS_BASE_URL;
   const enableGoogleToggle = qs("#enable-google");
   if (enableGoogleToggle) {
     enableGoogleToggle.checked = Boolean(appState.enable_google_services && ENABLE_GOOGLE_SERVICES);
@@ -131,6 +146,15 @@ function computeGoogleStatus() {
 
 function updateGoogleStatus() {
   const status = computeGoogleStatus();
+  const providers = appState.metadata?.providers || {};
+  const graphhopperBase = providers.graphhopper?.base_url || appState.graphhopper_base_url || DEFAULT_GRAPHHOPPER_BASE_URL;
+  const osrmBase = providers.osrm?.base_url || appState.osrm_base_url || DEFAULT_OSRM_BASE_URL;
+  const orsBase = providers.ors?.base_url || appState.ors_base_url || DEFAULT_ORS_BASE_URL;
+  const graphhopperConfigured =
+    (providers.graphhopper?.configured ?? Boolean(appState.graphhopper_api_key)) || isLocalUrl(graphhopperBase);
+  const orsConfigured = (providers.ors?.api_key ?? Boolean(appState.ors_api_key)) || isLocalUrl(orsBase);
+  const alternativesReady = graphhopperConfigured || orsConfigured;
+  const fallbackReady = Boolean(osrmBase);
   const googleStatusEl = qs("#google-status");
   if (googleStatusEl) {
     let text = "Не проверен";
@@ -142,8 +166,13 @@ function updateGoogleStatus() {
       text = "Ошибка доступа";
       colorClass = "text-red-400";
     } else if (status === "disabled") {
-      text = "Отключено";
-      colorClass = "text-slate-500";
+      if (alternativesReady || fallbackReady) {
+        text = "Альтернативы активны";
+        colorClass = "text-emerald-300";
+      } else {
+        text = "Отключено";
+        colorClass = "text-slate-500";
+      }
     }
     googleStatusEl.textContent = text;
     googleStatusEl.className = `font-semibold ${colorClass}`;
@@ -155,11 +184,16 @@ function updateGoogleStatus() {
   const detail = appState.metadata?.google_key_status_detail;
   if (indicator) {
     if (status === "disabled") {
-      indicator.className = "status-indicator status-disabled";
-      indicator.textContent = "–";
+      if (alternativesReady || fallbackReady) {
+        indicator.className = "status-indicator status-ok";
+        indicator.textContent = "✓";
+      } else {
+        indicator.className = "status-indicator status-pending";
+        indicator.textContent = "!";
+      }
     } else {
       indicator.className = `status-indicator status-${status}`;
-      indicator.textContent = "✓";
+      indicator.textContent = status === "error" ? "!" : "✓";
     }
   }
   if (indicatorLabel) {
@@ -176,10 +210,17 @@ function updateGoogleStatus() {
           ? `Ошибка: ${detail}`
           : "Проверьте ключ в настройках";
     } else if (status === "disabled") {
-      indicatorLabel.textContent = "Google API отключён";
-      indicatorLabel.className = "text-xs font-semibold text-slate-400";
-      if (indicatorCaption)
-        indicatorCaption.textContent = "Разрешите использование Google API, чтобы активировать интеграцию";
+      const activeText = alternativesReady || fallbackReady ? "Альтернативные API активны" : "Проверьте альтернативные API";
+      indicatorLabel.textContent = activeText;
+      indicatorLabel.className = alternativesReady || fallbackReady
+        ? "text-xs font-semibold text-emerald-300"
+        : "text-xs font-semibold text-amber-300";
+      if (indicatorCaption) {
+        indicatorCaption.textContent = `GraphHopper: ${stripProtocol(graphhopperBase) || "—"} • OSRM: ${stripProtocol(
+          osrmBase,
+        ) || "—"} • ORS: ${stripProtocol(orsBase) || "—"}`;
+      }
+      return;
     } else {
       indicatorLabel.textContent = "Google API не проверен";
       indicatorLabel.className = "text-xs font-semibold text-amber-300";
@@ -946,6 +987,22 @@ const handleConfigSave = async () => {
   const orsKey = qs("#ors-key")?.value.trim();
   if (orsKey) {
     payload.ors_api_key = orsKey;
+  }
+  const graphhopperKey = qs("#graphhopper-key")?.value.trim();
+  if (graphhopperKey) {
+    payload.graphhopper_api_key = graphhopperKey;
+  }
+  const graphhopperBase = qs("#graphhopper-base-url");
+  if (graphhopperBase) {
+    payload.graphhopper_base_url = graphhopperBase.value.trim();
+  }
+  const osrmBase = qs("#osrm-base-url");
+  if (osrmBase) {
+    payload.osrm_base_url = osrmBase.value.trim();
+  }
+  const orsBase = qs("#ors-base-url");
+  if (orsBase) {
+    payload.ors_base_url = orsBase.value.trim();
   }
   const response = await fetch("/api/config", {
     method: "POST",

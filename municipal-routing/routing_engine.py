@@ -10,9 +10,12 @@ from shapely.geometry import LineString, Polygon, box, mapping, shape
 from google_client import GoogleClient  # noqa: F401  # сохраняем возможность вернуть Google при необходимости
 from kml_utils import KMLDataLoader, export_geojson as export_geojson_file
 from routing_providers import (
+    GraphHopperClient,
     OSRMClient,
     OpenRouteServiceClient,
     compute_transition,
+    decode_graphhopper_distance,
+    decode_graphhopper_duration,
     decode_ors_distance,
     decode_ors_duration,
     decode_osrm_distance,
@@ -60,9 +63,29 @@ class RoutingEngine:
 
         ors_key = options.get("ors_api_key") or self.state.ors_api_key or os.getenv("ORS_API_KEY", "")
         yandex_key = options.get("yandex_api_key") or self.state.yandex_api_key or os.getenv("YANDEX_API_KEY", "")
+        graphhopper_key = options.get("graphhopper_api_key") or self.state.graphhopper_api_key or os.getenv(
+            "GRAPHHOPPER_API_KEY", ""
+        )
+        osrm_base_url = options.get("osrm_base_url") or self.state.osrm_base_url or os.getenv(
+            "OSRM_BASE_URL", "https://router.project-osrm.org"
+        )
+        ors_base_url = options.get("ors_base_url") or self.state.ors_base_url or os.getenv(
+            "ORS_BASE_URL", "https://api.openrouteservice.org"
+        )
+        graphhopper_base_url = options.get("graphhopper_base_url") or self.state.graphhopper_base_url or os.getenv(
+            "GRAPHHOPPER_BASE_URL", "https://graphhopper.com/api/1"
+        )
 
-        osrm_client = OSRMClient()
-        ors_client = OpenRouteServiceClient(api_key=ors_key)
+        self.state.ors_api_key = ors_key
+        self.state.yandex_api_key = yandex_key
+        self.state.graphhopper_api_key = graphhopper_key
+        self.state.osrm_base_url = osrm_base_url
+        self.state.ors_base_url = ors_base_url
+        self.state.graphhopper_base_url = graphhopper_base_url
+
+        osrm_client = OSRMClient(base_url=osrm_base_url)
+        ors_client = OpenRouteServiceClient(api_key=ors_key, base_url=ors_base_url)
+        graphhopper_client = GraphHopperClient(api_key=graphhopper_key, base_url=graphhopper_base_url)
         yandex_client = YandexClient(api_key=yandex_key)
 
         # Для повторного подключения Google API достаточно установить ENABLE_GOOGLE_SERVICES = True
@@ -76,6 +99,19 @@ class RoutingEngine:
         base_str = f"{base['lat']},{base['lng']}"
 
         segment_lookup = {seg["id"]: seg for seg in road_segments}
+
+        provider_log_message = (
+            f"Провайдеры маршрутизации: GraphHopper → {graphhopper_base_url}, OSRM → {osrm_base_url}, ORS → {ors_base_url}"
+        )
+        log_entries.append(
+            {
+                "timestamp": datetime.utcnow().isoformat(),
+                "level": "INFO",
+                "message": provider_log_message,
+            }
+        )
+
+        graphhopper_enabled = graphhopper_client.is_configured()
 
         for tractor in self.state.tractors:
             assigned_ids = self.state.assignments.get(tractor["id"], [])
@@ -123,9 +159,13 @@ class RoutingEngine:
                     self.state.travel_mode,
                     osrm_client,
                     ors_client,
+                    graphhopper_client,
                 )
 
-                if transition.get("source") == "osrm":
+                if transition.get("source") == "graphhopper":
+                    transition_distance = decode_graphhopper_distance(transition)
+                    transition_duration = decode_graphhopper_duration(transition)
+                elif transition.get("source") == "osrm":
                     transition_distance = decode_osrm_distance(transition)
                     transition_duration = decode_osrm_duration(transition)
                 else:
@@ -133,12 +173,20 @@ class RoutingEngine:
                     transition_duration = decode_ors_duration(transition)
 
                 profile_map = {
-                    "walking": ("foot", "foot-walking"),
-                    "bicycling": ("bike", "cycling-regular"),
+                    "walking": ("foot", "foot-walking", "foot"),
+                    "bicycling": ("bike", "cycling-regular", "bike"),
                 }
-                osrm_profile, _ = profile_map.get(self.state.travel_mode, ("driving", "driving-car"))
+                osrm_profile, _, graphhopper_profile = profile_map.get(
+                    self.state.travel_mode, ("driving", "driving-car", "car")
+                )
 
-                snapped = osrm_client.match(coords, profile=osrm_profile)
+                snapped = {}
+                if graphhopper_enabled:
+                    snapped = graphhopper_client.match(coords, profile=graphhopper_profile)
+                    if not GraphHopperClient.is_success(snapped):
+                        snapped = {}
+                if not snapped:
+                    snapped = osrm_client.match(coords, profile=osrm_profile)
                 elevation = ors_client.elevation_line(coords) if ors_key else {"status": "SKIPPED"}
                 geocode = yandex_client.geocode(f"{start[0]},{start[1]}") if yandex_client.api_key else {}
                 places = yandex_client.suggest(segment.get("name", start_str)) if yandex_client.api_key else {}
@@ -224,6 +272,20 @@ class RoutingEngine:
             "grid": self.state.grid,
             "progress": progress,
             "eta": self._estimate_eta(progress),
+            "providers": {
+                "graphhopper": {
+                    "base_url": graphhopper_base_url,
+                    "configured": graphhopper_enabled,
+                    "api_key": bool(graphhopper_key),
+                },
+                "osrm": {"base_url": osrm_base_url},
+                "ors": {"base_url": ors_base_url, "api_key": bool(ors_key)},
+                "yandex": {"api_key": bool(yandex_key)},
+                "google": {
+                    "enabled": enable_google,
+                    "api_key": bool(self.state.google_api_key),
+                },
+            },
         }
 
         return {"routes": routes, "log": log_entries, "metadata": metadata}

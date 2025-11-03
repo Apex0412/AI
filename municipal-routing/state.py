@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -45,10 +46,14 @@ class AppState:
     google_api_key: str = ""
     yandex_api_key: str = ""
     ors_api_key: str = ""
+    graphhopper_api_key: str = ""
     enable_google_services: bool = False
     monitoring_enabled: bool = False
     night_mode: bool = False
     map_provider: str = "yandex"
+    osrm_base_url: str = ""
+    ors_base_url: str = ""
+    graphhopper_base_url: str = ""
 
     def ensure_tractors(self, count: int) -> None:
         if count < 1:
@@ -87,6 +92,15 @@ class AppState:
         self.metadata.clear()
         self.last_run = None
 
+    def _is_local_url(self, url: str) -> bool:
+        if not url:
+            return False
+        lowered = url.lower()
+        return lowered.startswith(("http://localhost", "https://localhost", "http://127.", "https://127.", "http://0.0.0.0", "https://0.0.0.0"))
+
+    def _graphhopper_enabled(self) -> bool:
+        return bool(self.graphhopper_api_key) or self._is_local_url(self.graphhopper_base_url)
+
     def to_dict(self) -> Dict:
         polygon_geojson = None
         if self.city_polygon is not None:
@@ -95,6 +109,21 @@ class AppState:
                 "properties": {"type": "city_polygon"},
                 "geometry": self.city_polygon.__geo_interface__,
             }
+        metadata = dict(self.metadata)
+        metadata["providers"] = {
+            "graphhopper": {
+                "base_url": self.graphhopper_base_url,
+                "configured": self._graphhopper_enabled(),
+                "api_key": bool(self.graphhopper_api_key),
+            },
+            "osrm": {"base_url": self.osrm_base_url},
+            "ors": {
+                "base_url": self.ors_base_url,
+                "api_key": bool(self.ors_api_key),
+            },
+            "yandex": {"api_key": bool(self.yandex_api_key)},
+            "google": {"enabled": self.enable_google_services and bool(self.google_api_key)},
+        }
         return {
             "base_location": self.base_location,
             "tractors": self.tractors,
@@ -103,7 +132,7 @@ class AppState:
             "grid": self.grid,
             "routes": self.routes,
             "log": self.log[-200:],
-            "metadata": self.metadata,
+            "metadata": metadata,
             "last_run": self.last_run,
             "road_segments": self.road_segments,
             "city_polygon": polygon_geojson,
@@ -114,10 +143,14 @@ class AppState:
             "google_api_key": bool(self.google_api_key),
             "yandex_api_key": bool(self.yandex_api_key),
             "ors_api_key": bool(self.ors_api_key),
+            "graphhopper_api_key": bool(self.graphhopper_api_key),
             "enable_google_services": self.enable_google_services,
             "monitoring_enabled": self.monitoring_enabled,
             "night_mode": self.night_mode,
             "map_provider": self.map_provider,
+            "osrm_base_url": self.osrm_base_url,
+            "ors_base_url": self.ors_base_url,
+            "graphhopper_base_url": self.graphhopper_base_url,
         }
 
 
@@ -152,9 +185,16 @@ def load_state(path: Path) -> AppState:
     state.travel_mode = session_data.get("travel_mode", "driving")
     state.max_waypoints = session_data.get("max_waypoints", 23)
     state.tractors_count = session_data.get("tractors_count", len(state.tractors))
-    state.google_api_key = session_data.get("google_api_key", "")
-    state.yandex_api_key = session_data.get("yandex_api_key", "")
-    state.ors_api_key = session_data.get("ors_api_key", "")
+    default_osrm = os.getenv("OSRM_BASE_URL", "https://router.project-osrm.org")
+    default_ors = os.getenv("ORS_BASE_URL", "https://api.openrouteservice.org")
+    default_graphhopper = os.getenv("GRAPHHOPPER_BASE_URL", "https://graphhopper.com/api/1")
+    state.google_api_key = session_data.get("google_api_key", os.getenv("GOOGLE_API_KEY", ""))
+    state.yandex_api_key = session_data.get("yandex_api_key", os.getenv("YANDEX_API_KEY", ""))
+    state.ors_api_key = session_data.get("ors_api_key", os.getenv("ORS_API_KEY", ""))
+    state.graphhopper_api_key = session_data.get("graphhopper_api_key", os.getenv("GRAPHHOPPER_API_KEY", ""))
+    state.osrm_base_url = session_data.get("osrm_base_url", default_osrm)
+    state.ors_base_url = session_data.get("ors_base_url", default_ors)
+    state.graphhopper_base_url = session_data.get("graphhopper_base_url", default_graphhopper)
     state.enable_google_services = session_data.get("enable_google_services", False)
     state.monitoring_enabled = session_data.get("monitoring_enabled", False)
     state.night_mode = session_data.get("night_mode", False)
@@ -179,9 +219,13 @@ def save_state(state: AppState, path: Path) -> None:
         "google_api_key": state.google_api_key,
         "yandex_api_key": state.yandex_api_key,
         "ors_api_key": state.ors_api_key,
+        "graphhopper_api_key": state.graphhopper_api_key,
         "enable_google_services": state.enable_google_services,
         "monitoring_enabled": state.monitoring_enabled,
         "night_mode": state.night_mode,
         "map_provider": state.map_provider,
+        "osrm_base_url": state.osrm_base_url,
+        "ors_base_url": state.ors_base_url,
+        "graphhopper_base_url": state.graphhopper_base_url,
     }
     path.write_text(json.dumps(payload, indent=2, ensure_ascii=False))
